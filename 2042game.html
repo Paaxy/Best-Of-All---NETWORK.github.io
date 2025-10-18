@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>2042 — Simple Merge Game</title>
+<style>
+  :root{
+    --bg:#f3f3f7; --board:#bdb7b1; --cell:#e9e6e3; --text:#222;
+    --size:320px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);font-family:system-ui,Segoe UI,Roboto,Arial;color:var(--text)}
+  .wrap{width:calc(var(--size) + 40px);max-width:96vw;padding:20px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  h1{font-size:18px;margin:0}
+  .controls{display:flex;gap:8px}
+  button{background:#3b82f6;color:#fff;border:0;padding:8px 10px;border-radius:6px;font-weight:600;cursor:pointer}
+  .meta{display:flex;gap:10px;align-items:center;font-size:14px}
+  .board{width:var(--size);height:var(--size);background:var(--board);padding:10px;border-radius:8px;display:grid;grid-template-columns:repeat(4,1fr);grid-gap:10px;touch-action:none;position:relative}
+  .cell{background:var(--cell);border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:20px;color:#333;min-height:calc(var(--size)/4 - 10px)}
+  .tile{position:absolute;border-radius:6px;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;transition:transform 120ms linear,left 120ms linear,top 120ms linear}
+  .msg{margin-top:10px;text-align:center}
+  .small{font-size:13px;color:#555}
+  /* tile colors */
+  .v2{background:#eee4da;color:#776e65}
+  .v4{background:#ede0c8;color:#776e65}
+  .v6{background:#f2b179}
+  .v8{background:#f59563}
+  .v16{background:#f67c5f}
+  .v32{background:#f65e3b}
+  .v64{background:#edcf72;color:#333}
+  .v128{background:#edcc61;color:#fff}
+  .v256{background:#edc850;color:#fff}
+  .v512{background:#edc53f;color:#fff}
+  .v1024{background:#3c3a32}
+  .v2042{background:#ffd700;color:#000}
+  .overlay{position:absolute;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;flex-direction:column;color:#fff;border-radius:8px;gap:8px}
+  @media (max-width:420px){:root{--size:92vw}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>2042 — Merge Puzzle</h1>
+      <div class="meta">
+        <div>Score: <strong id="score">0</strong></div>
+        <div class="small">Goal: <strong>2042</strong></div>
+        <div class="controls">
+          <button id="new">New</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="board" class="board" role="application" aria-label="2042 game board">
+      <!-- 16 background cells -->
+      <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+      <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+      <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+      <div class="cell"></div><div class="cell"></div><div class="cell"></div><div class="cell"></div>
+      <!-- tiles container -->
+    </div>
+
+    <div class="msg small" id="hint">Use arrow keys or swipe to move. Tap New to restart.</div>
+  </div>
+
+<script>
+(() => {
+  const SIZE = 4;
+  const GOAL = 2042;
+  const boardEl = document.getElementById('board');
+  const scoreEl = document.getElementById('score');
+  const newBtn = document.getElementById('new');
+  const hint = document.getElementById('hint');
+
+  let grid = [];
+  let score = 0;
+  let tiles = []; // active DOM tiles
+  let animating = false;
+
+  function init() {
+    grid = Array.from({length: SIZE}, ()=> Array(SIZE).fill(0));
+    score = 0;
+    updateScore();
+    clearTiles();
+    spawnRandom();
+    spawnRandom();
+    draw();
+  }
+
+  function updateScore(){ scoreEl.textContent = score; }
+
+  function clearTiles(){
+    tiles.forEach(t=> t.el.remove());
+    tiles = [];
+  }
+
+  function spawnRandom(){
+    const empties = [];
+    for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) if(grid[r][c]===0) empties.push([r,c]);
+    if(!empties.length) return false;
+    const [r,c] = empties[Math.floor(Math.random()*empties.length)];
+    // spawn value 2,4 or 6 (gives flexibility to reach non-power-of-two goal)
+    const rnd = Math.random();
+    const val = rnd < 0.78 ? 2 : (rnd < 0.96 ? 4 : 6);
+    grid[r][c] = val;
+    return true;
+  }
+
+  function cellPos(r,c){
+    const boardRect = boardEl.getBoundingClientRect();
+    const gap = 10;
+    const w = (boardRect.width - gap*3)/4;
+    const left = c*(w + gap) + 10;
+    const top = r*(w + gap) + 10;
+    return {left, top, size: w};
+  }
+
+  function createTile(r,c,v){
+    const tile = document.createElement('div');
+    tile.className = 'tile v' + v;
+    tile.textContent = v;
+    tile.style.width = tile.style.height = '0px';
+    tile.style.left = '0px'; tile.style.top = '0px';
+    boardEl.appendChild(tile);
+    tiles.push({r,c,v,el:tile});
+    positionTile(tiles[tiles.length-1], true);
+  }
+
+  function positionTile(obj, instant){
+    const pos = cellPos(obj.r,obj.c);
+    obj.el.style.width = obj.el.style.height = pos.size + 'px';
+    obj.el.style.left = pos.left + 'px';
+    obj.el.style.top = pos.top + 'px';
+    obj.el.className = 'tile v' + obj.v;
+    obj.el.textContent = obj.v;
+    if(instant) obj.el.style.transform = 'scale(0.01)';
+    requestAnimationFrame(()=> obj.el.style.transform = 'scale(1)');
+  }
+
+  function refreshTiles(){
+    // remove all and recreate from grid for simplicity
+    clearTiles();
+    for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++) {
+      const v = grid[r][c];
+      if(v) createTile(r,c,v);
+    }
+  }
+
+  // movement helpers: compress+merge for a line
+  function operateLine(line){
+    // line is array of numbers length 4
+    let moved = false;
+    let arr = line.filter(n=>n!==0);
+    for(let i=0;i<arr.length-1;i++){
+      if(arr[i] === arr[i+1]){ arr[i] = arr[i] + arr[i+1]; score += arr[i]; arr.splice(i+1,1); moved = true; }
+    }
+    while(arr.length < SIZE) arr.push(0);
+    for(let i=0;i<SIZE;i++) if(line[i] !== arr[i]) moved = true;
+    return {line:arr, moved};
+  }
+
+  function move(dir){ // 0:left,1:up,2:right,3:down
+    if(animating) return;
+    const old = grid.map(r=>r.slice());
+    let moved = false;
+
+    if(dir === 0){ // left
+      for(let r=0;r<SIZE;r++){
+        const res = operateLine(grid[r]);
+        grid[r] = res.line;
+        if(res.moved) moved = true;
+      }
+    } else if(dir === 2){ // right
+      for(let r=0;r<SIZE;r++){
+        const rev = grid[r].slice().reverse();
+        const res = operateLine(rev);
+        grid[r] = res.line.reverse();
+        if(res.moved) moved = true;
+      }
+    } else if(dir === 1){ // up
+      for(let c=0;c<SIZE;c++){
+        const col = [];
+        for(let r=0;r<SIZE;r++) col.push(grid[r][c]);
+        const res = operateLine(col);
+        for(let r=0;r<SIZE;r++) grid[r][c] = res.line[r];
+        if(res.moved) moved = true;
+      }
+    } else if(dir === 3){ // down
+      for(let c=0;c<SIZE;c++){
+        const col = [];
+        for(let r=0;r<SIZE;r++) col.push(grid[r][c]);
+        const rev = col.slice().reverse();
+        const res = operateLine(rev);
+        const out = res.line.reverse();
+        for(let r=0;r<SIZE;r++) grid[r][c] = out[r];
+        if(res.moved) moved = true;
+      }
+    }
+
+    if(moved){
+      // animate simple by rebuiliding tiles
+      updateScore();
+      spawnRandom();
+      refreshTiles();
+      checkState();
+    }
+  }
+
+  function checkState(){
+    // win?
+    for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+      if(grid[r][c] === GOAL){
+        showOverlay('You Win!', 'Nice job — you reached ' + GOAL);
+        return;
+      }
+    }
+    // any moves?
+    if(canMove()) return;
+    showOverlay('Game Over', 'No more moves. Score: ' + score);
+  }
+
+  function canMove(){
+    for(let r=0;r<SIZE;r++) for(let c=0;c<SIZE;c++){
+      if(grid[r][c] === 0) return true;
+      if(c < SIZE-1 && grid[r][c] === grid[r][c+1]) return true;
+      if(r < SIZE-1 && grid[r][c] === grid[r+1][c]) return true;
+    }
+    return false;
+  }
+
+  // overlay
+  let overlayEl = null;
+  function showOverlay(title, msg){
+    if(overlayEl) overlayEl.remove();
+    overlayEl = document.createElement('div');
+    overlayEl.className = 'overlay';
+    overlayEl.innerHTML = `<h2>${title}</h2><div>${msg}</div><div style="display:flex;gap:8px;margin-top:8px"><button id="continue">Continue</button><button id="restart">Restart</button></div>`;
+    boardEl.appendChild(overlayEl);
+    document.getElementById('continue').addEventListener('click', ()=> {
+      overlayEl.remove(); overlayEl = null;
+    });
+    document.getElementById('restart').addEventListener('click', ()=> {
+      overlayEl.remove(); overlayEl = null; init();
+    });
+  }
+
+  // input (keyboard)
+  window.addEventListener('keydown', e => {
+    if(['ArrowLeft','a','A'].includes(e.key)) move(0);
+    if(['ArrowUp','w','W'].includes(e.key)) move(1);
+    if(['ArrowRight','d','D'].includes(e.key)) move(2);
+    if(['ArrowDown','s','S'].includes(e.key)) move(3);
+  });
+
+  // swipe / pointer
+  let startX=0, startY=0, isDown=false;
+  boardEl.addEventListener('pointerdown', e => { startX = e.clientX; startY = e.clientY; isDown = true; boardEl.setPointerCapture(e.pointerId); });
+  boardEl.addEventListener('pointerup', e => {
+    if(!isDown) return;
+    isDown = false;
+    const dx = e.clientX - startX, dy = e.clientY - startY;
+    const absX = Math.abs(dx), absY = Math.abs(dy);
+    if(Math.max(absX,absY) < 20) return;
+    if(absX > absY) dx < 0 ? move(0) : move(2);
+    else dy < 0 ? move(1) : move(3);
+  });
+
+  // buttons
+  newBtn.addEventListener('click', init);
+
+  // handle resize to reposition tiles
+  window.addEventListener('resize', refreshTiles);
+
+  // draw initial grid
+  function draw(){ refreshTiles(); updateScore(); }
+
+  // start
+  init();
+
+})();
+</script>
