@@ -1,5 +1,4 @@
-// ...existing code...
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -12,13 +11,22 @@
 <style>
   html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Arial}
   #renderCanvas{width:100%;height:100%;display:block;background:linear-gradient(#87ceeb, #cde9ff)}
-  #hud{position:fixed;left:12px;top:12px;z-index:20;background:rgba(255,255,255,0.8);padding:8px;border-radius:8px}
-  #palette{display:flex;gap:6px;margin-top:8px}
+  #hud{position:fixed;left:12px;top:12px;z-index:20;background:rgba(255,255,255,0.9);padding:8px;border-radius:8px}
+  #palette{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
   .slot{width:36px;height:36px;border-radius:6px;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-weight:700;cursor:pointer}
   .slot.sel{outline:3px solid #111}
   #centerCross{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:rgba(0,0,0,0.6);z-index:10;pointer-events:none}
   #help{position:fixed;right:12px;top:12px;background:rgba(255,255,255,0.85);padding:8px;border-radius:8px;font-size:13px}
   button{cursor:pointer}
+  /* mobile controls */
+  #mobileControls{position:fixed;left:12px;bottom:12px;z-index:30;display:none;gap:8px}
+  #mobileControls .dir{display:flex;gap:6px;margin-bottom:6px}
+  #mobileControls button{width:56px;height:56px;border-radius:10px;border:none;background:rgba(255,255,255,0.92);font-weight:700}
+  #mobileLookHint{position:fixed;right:12px;bottom:12px;background:rgba(255,255,255,0.9);padding:8px;border-radius:8px;z-index:30;display:none}
+  @media (max-width:900px){
+    #mobileControls{display:flex;flex-direction:column}
+    #mobileLookHint{display:block}
+  }
 </style>
 </head>
 <body>
@@ -31,142 +39,135 @@
   <div id="help">Click to lock pointer. WASD move, Space jump</div>
   <div id="centerCross"></div>
 
+  <!-- Mobile controls -->
+  <div id="mobileControls" aria-hidden="false">
+    <div class="dir">
+      <button id="mForward">▲</button>
+    </div>
+    <div class="dir">
+      <button id="mLeft">◀</button>
+      <button id="mBack">▼</button>
+      <button id="mRight">▶</button>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button id="mJump">Jump</button>
+      <button id="mBreak">Break</button>
+      <button id="mPlace">Place</button>
+    </div>
+  </div>
+  <div id="mobileLookHint">Drag right side to look</div>
+
 <script>
 (() => {
+  // ...existing code...
   const canvas = document.getElementById('renderCanvas');
   const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
   const scene = new BABYLON.Scene(engine);
   scene.clearColor = new BABYLON.Color3(0.53,0.8,1);
 
   // --- Block definitions (colors per request) ---
-  // 0=air
   const BLOCKS = [
     { id:0, name:'Air', color:null },
-    { id:1, name:'Grass', color:0x008f11 },        // green
-    { id:2, name:'Dirt', color:0x8b5a2b },         // brown
-    { id:3, name:'Stone', color:0x999999 },        // gray stone
-    { id:4, name:'Coal', color:0x0b0b0b },         // black
-    { id:5, name:'Iron', color:0xd2b48c },         // light brown/gray-ish
-    { id:6, name:'Redstone', color:0xff3333 },     // red
-    { id:7, name:'Gold', color:0xffd000 },         // yellow
-    { id:8, name:'Water', color:0x3f8efc },        // blue
-    { id:9, name:'Log', color:0x4b2e19 },          // dark brown logs
-    { id:10,name:'Leaves', color:0x114411 }        // dark green leaves
+    { id:1, name:'Grass', color:0x008f11 },
+    { id:2, name:'Dirt', color:0x8b5a2b },
+    { id:3, name:'Stone', color:0x999999 },
+    { id:4, name:'Coal', color:0x0b0b0b },
+    { id:5, name:'Iron', color:0xd2b48c },
+    { id:6, name:'Redstone', color:0xff3333 },
+    { id:7, name:'Gold', color:0xffd000 },
+    { id:8, name:'Water', color:0x3f8efc },
+    { id:9, name:'Log', color:0x4b2e19 },
+    { id:10,name:'Leaves', color:0x114411 }
   ];
 
   // world parameters
-  const R = 22; // radius x/z (world will be roughly (2R+1)^2)
-  const MAX_H = 18; // height
-  const world = new Map(); // key -> id
-  const instances = new Map(); // key -> InstancedMesh (for removal)
+  const R = 22;
+  const MAX_H = 32;
+  const world = new Map();
+  const instances = new Map();
   function key(x,y,z){ return `${x},${y},${z}`; }
   function getBlock(x,y,z){ return world.get(key(x,y,z)) || 0; }
-  function setBlock(x,y,z,id){
-    const k = key(x,y,z);
-    const old = world.get(k) || 0;
-    if (old === id) return;
-    // remove old instance if present
-    const oldInst = instances.get(k);
-    if (oldInst){ try{ oldInst.dispose(); } catch(e){} instances.delete(k); }
-    if (id === 0){ world.delete(k); return; }
-    world.set(k,id);
-    // create instance for mesh pool
-    const base = meshPool.get(id);
-    if (base){
-      const inst = base.createInstance(k);
-      inst.position.set(x + 0.5, y + 0.5, z + 0.5);
-      inst.rotationQuaternion = null;
-      inst.isPickable = false;
-      instances.set(k, inst);
-    }
-  }
 
-  // --- basic scene: light + camera ---
-  const hemi = new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.6,1,0.4), scene);
-  hemi.intensity = 0.9;
-  const dir = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(-0.5,-1,0.5), scene);
-  dir.position = new BABYLON.Vector3(40,60,20);
-  dir.intensity = 0.6;
-
-  // camera/player (we implement our own physics)
-  const camera = new BABYLON.FreeCamera('playerCam', new BABYLON.Vector3(0,6,0), scene);
-  camera.fov = 0.9;
-  camera.attachControl(canvas, true);
-  // pointer lock on click
-  canvas.addEventListener('click', ()=> {
-    if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
-  });
-  // disable default camera inputs (we handle manually)
-  camera.inputs.clear();
-
-  // simple cursor orientation via pointerlock mousemove
-  let yaw = 0, pitch = 0;
-  const PI_2 = Math.PI/2;
-  document.addEventListener('pointerlockchange', () => {
-    // nothing
-  });
-  window.addEventListener('mousemove', (e) => {
-    if (document.pointerLockElement !== canvas) return;
-    const sensitivity = 0.0022;
-    // Fix: use natural mapping: move mouse right => increase yaw (look right)
-    yaw += e.movementX * sensitivity;
-    // Fix: move mouse up => look up (decrease pitch)
-    pitch -= e.movementY * sensitivity;
-    pitch = Math.max(-PI_2 + 0.1, Math.min(PI_2 - 0.1, pitch));
-    camera.rotation = new BABYLON.Vector3(pitch, yaw, 0);
-  });
-
-  // --- mesh pool (one base box per block type) ---
+  // mesh pool + instancing
   const meshPool = new Map();
+  const instancesByBase = new Map();
   for (let b of BLOCKS){
     if (b.id === 0) continue;
     const mat = new BABYLON.StandardMaterial('m'+b.id, scene);
     mat.diffuseColor = BABYLON.Color3.FromHexString('#' + b.color.toString(16).padStart(6,'0'));
     mat.specularColor = new BABYLON.Color3(0.1,0.1,0.1);
-    mat.backFaceCulling = false;
     const box = BABYLON.MeshBuilder.CreateBox('box'+b.id, { size: 1 }, scene);
     box.material = mat;
-    box.isVisible = false; // base not visible; instances will be visible
-    box.checkCollisions = true;
+    box.isVisible = false;
     meshPool.set(b.id, box);
+    instancesByBase.set(b.id, []);
   }
 
-  // ground/below plane (invisible collider floor for out-of-range)
+  function createInstanceForBlock(x,y,z,id){
+    const base = meshPool.get(id);
+    if (!base) return null;
+    const inst = base.createInstance(key(x,y,z));
+    inst.position.set(x + 0.5, y + 0.5, z + 0.5);
+    inst.isPickable = false;
+    instances.set(key(x,y,z), inst);
+    instancesByBase.get(id).push(inst);
+    return inst;
+  }
+
+  function removeInstance(x,y,z){
+    const k = key(x,y,z);
+    const i = instances.get(k);
+    if (i){ try{ i.dispose(); }catch(e){} instances.delete(k); }
+  }
+
+  function setBlock(x,y,z,id){
+    const k = key(x,y,z);
+    const old = world.get(k) || 0;
+    if (old === id) return;
+    removeInstance(x,y,z);
+    if (id === 0){
+      world.delete(k);
+      return;
+    }
+    world.set(k,id);
+    createInstanceForBlock(x,y,z,id);
+  }
+
+  // ground plane invisible
   const floor = BABYLON.MeshBuilder.CreateGround('floor', {width:1000, height:1000}, scene);
   floor.position.y = -100;
   floor.isVisible = false;
 
-  // --- terrain generation (simple smooth noise) ---
+  // terrain generation
   function noise(x,z){
     return (Math.sin(x*0.12 + z*0.07) + Math.cos((x - z)*0.08) + Math.sin((x*0.15 - z*0.11)*0.9))*1.6;
   }
   function generateTerrain(){
     world.clear();
-    // remove existing instances
+    // dispose all instances
     for (let inst of instances.values()){ try{ inst.dispose(); }catch{} }
     instances.clear();
+    instancesByBase.forEach((arr)=>arr.length=0);
     for (let x = -R; x <= R; x++){
       for (let z = -R; z <= R; z++){
         const h = Math.floor(6 + noise(x,z) * 3 + Math.sin((x*z)*0.01));
         for (let y = 0; y <= h; y++){
-          let id = 2; // dirt
-          if (y === h) id = 1; // grass
+          let id = 2;
+          if (y === h) id = 1;
           else if (y <= h - 4) {
-            id = 3; // stone
+            id = 3;
             const r = Math.random();
-            if (r < 0.012) id = 4; // coal
-            else if (r < 0.018) id = 5; // iron
-            else if (r < 0.02) id = 6; // redstone
-            else if (r < 0.022) id = 7; // gold
+            if (r < 0.012) id = 4;
+            else if (r < 0.018) id = 5;
+            else if (r < 0.02) id = 6;
+            else if (r < 0.022) id = 7;
           }
           setBlock(x,y,z,id);
         }
-        // water fill if low
         const hval = Math.floor(6 + noise(x,z) * 3);
         if (hval < 4){
           for (let y = hval+1; y <= 4; y++) setBlock(x,y,z,8);
         }
-        // trees
         if (Math.random() < 0.04 && noise(x,z) > -1){
           const trunk = 3 + Math.floor(Math.random()*2);
           const baseH = Math.floor(6 + noise(x,z)*3);
@@ -182,9 +183,36 @@
 
   generateTerrain();
 
-  // --- player physics (simple AABB) ---
+  // find highest ground at integer x,z
+  function findGroundHeight(ix, iz){
+    for (let y = MAX_H; y >= -10; y--){
+      if (getBlock(ix,y,iz) !== 0) return y;
+    }
+    return -999; // no ground found
+  }
+
+  // --- player / camera ---
+  const camera = new BABYLON.FreeCamera('playerCam', new BABYLON.Vector3(0,6,0), scene);
+  camera.attachControl(canvas, true);
+  camera.inputs.clear();
+
+  let yaw = 0, pitch = 0;
+  const PI_2 = Math.PI/2;
+  // pointer look
+  canvas.addEventListener('click', ()=> {
+    if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    const sensitivity = 0.0022;
+    yaw += e.movementX * sensitivity;
+    pitch -= e.movementY * sensitivity;
+    pitch = Math.max(-PI_2 + 0.05, Math.min(PI_2 - 0.05, pitch));
+    camera.rotation = new BABYLON.Vector3(pitch, yaw, 0);
+  });
+
   const player = {
-    pos: new BABYLON.Vector3(0, 10, 0),
+    pos: new BABYLON.Vector3(0, 0, 0),
     vel: new BABYLON.Vector3(0, 0, 0),
     speed: 6,
     width: 0.6,
@@ -192,7 +220,33 @@
     onGround: false
   };
 
-  // simple AABB collision check against blocks in world
+  // place player above ground safely
+  function spawnPlayerAt(x=0,z=0){
+    const ix = Math.round(x), iz = Math.round(z);
+    const gy = findGroundHeight(ix, iz);
+    if (gy > -900){
+      player.pos.x = x;
+      player.pos.z = z;
+      player.pos.y = gy + 1.2; // a little above ground
+    } else {
+      player.pos.x = x;
+      player.pos.z = z;
+      player.pos.y = 12; // fallback
+    }
+    // if inside block, nudge upward until free
+    for (let i=0;i<40;i++){
+      const min = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
+      const max = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
+      if (!boxCollides(min, max)) break;
+      player.pos.y += 0.6;
+    }
+    camera.position.set(player.pos.x, player.pos.y + 0.4, player.pos.z);
+  }
+
+  // initial spawn at center
+  spawnPlayerAt(0,0);
+
+  // collision helpers
   function boxCollides(min, max){
     const x0 = Math.floor(min.x), x1 = Math.floor(max.x);
     const y0 = Math.floor(min.y), y1 = Math.floor(max.y);
@@ -207,9 +261,9 @@
     return false;
   }
 
-  // raycast through voxel grid (step along ray) to pick block and face normal
+  // raycast voxel
   function raycastVoxel(origin, dir, maxDist=8){
-    const step = 0.1;
+    const step = 0.08;
     let t = 0;
     while (t < maxDist){
       const p = origin.add(dir.scale(t));
@@ -238,7 +292,7 @@
     if (e.key === 'd') input.right = true;
     if (e.code === 'Space') { if (player.onGround) player.vel.y = 9; }
     if (/^[1-9]$/.test(e.key)){ const idx = Number(e.key); if (idx < BLOCKS.length) { selected = idx; updatePalette(); } }
-    if (e.key === 'r') { generateTerrain(); }
+    if (e.key === 'r') { generateTerrain(); spawnPlayerAt(player.pos.x, player.pos.z); }
   });
   window.addEventListener('keyup', (e) => {
     if (e.key === 'w') input.forward = false;
@@ -247,12 +301,11 @@
     if (e.key === 'd') input.right = false;
   });
 
-  // pointer actions: LMB break, RMB place
+  // pointer actions
   window.addEventListener('pointerdown', (ev) => {
-    if (document.pointerLockElement !== canvas) return;
-    // build ray in world space from camera
+    if (document.pointerLockElement !== canvas && window.innerWidth > 900) return;
     const origin = camera.position.clone();
-    // compute forward vector from yaw/pitch (avoid camera.rotationQuaternion dependency)
+    // forward from yaw/pitch
     const fx = Math.sin(yaw) * Math.cos(pitch);
     const fy = Math.sin(pitch);
     const fz = Math.cos(yaw) * Math.cos(pitch);
@@ -260,14 +313,10 @@
     const hit = raycastVoxel(origin, forward, 8);
     if (!hit) return;
     if (ev.button === 0){
-      // break
       setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0);
     } else if (ev.button === 2){
-      // place
-      const p = hit.pos;
-      const f = hit.face;
+      const p = hit.pos, f = hit.face;
       const placeX = p.x + f.x, placeY = p.y + f.y, placeZ = p.z + f.z;
-      // don't place inside player
       const min = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
       const max = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
       if (!(placeX >= Math.floor(min.x) && placeX <= Math.floor(max.x) &&
@@ -278,6 +327,76 @@
     }
   });
   window.addEventListener('contextmenu', (e)=> e.preventDefault());
+
+  // mobile: touch look on right half
+  let touchLook = false;
+  let lastTouchX = 0, lastTouchY = 0;
+  canvas.addEventListener('touchstart', (ev) => {
+    for (let t of ev.touches){
+      if (t.clientX > canvas.clientWidth * 0.5){
+        touchLook = true;
+        lastTouchX = t.clientX; lastTouchY = t.clientY;
+        ev.preventDefault();
+        break;
+      }
+    }
+  }, { passive:false });
+  canvas.addEventListener('touchmove', (ev) => {
+    if (!touchLook) return;
+    const t = ev.touches[0];
+    if (!t) return;
+    const dx = t.clientX - lastTouchX;
+    const dy = t.clientY - lastTouchY;
+    lastTouchX = t.clientX; lastTouchY = t.clientY;
+    const sensitivity = 0.005;
+    yaw += dx * sensitivity;
+    pitch -= dy * sensitivity;
+    pitch = Math.max(-PI_2 + 0.05, Math.min(PI_2 - 0.05, pitch));
+    camera.rotation = new BABYLON.Vector3(pitch, yaw, 0);
+    ev.preventDefault();
+  }, { passive:false });
+  canvas.addEventListener('touchend', (ev) => { touchLook = false; });
+
+  // mobile control buttons
+  const mForward = document.getElementById('mForward'), mBack = document.getElementById('mBack'),
+        mLeft = document.getElementById('mLeft'), mRight = document.getElementById('mRight'),
+        mJump = document.getElementById('mJump'), mBreak = document.getElementById('mBreak'),
+        mPlace = document.getElementById('mPlace');
+  function bindTouchBtn(el, downCb, upCb){
+    if (!el) return;
+    el.addEventListener('touchstart', (e)=>{ e.preventDefault(); downCb(); }, { passive:false });
+    el.addEventListener('touchend', (e)=>{ e.preventDefault(); upCb(); }, { passive:false });
+    el.addEventListener('mousedown', (e)=>{ e.preventDefault(); downCb(); });
+    el.addEventListener('mouseup', (e)=>{ e.preventDefault(); upCb(); });
+  }
+  bindTouchBtn(mForward, ()=>input.forward = true, ()=>input.forward = false);
+  bindTouchBtn(mBack, ()=>input.back = true, ()=>input.back = false);
+  bindTouchBtn(mLeft, ()=>input.left = true, ()=>input.left = false);
+  bindTouchBtn(mRight, ()=>input.right = true, ()=>input.right = false);
+  bindTouchBtn(mJump, ()=>{ if (player.onGround) player.vel.y = 9; }, ()=>{});
+  bindTouchBtn(mBreak, ()=> {
+    // center ray
+    const origin = camera.position.clone();
+    const fx = Math.sin(yaw) * Math.cos(pitch);
+    const fy = Math.sin(pitch);
+    const fz = Math.cos(yaw) * Math.cos(pitch);
+    const forward = new BABYLON.Vector3(fx, fy, fz).normalize();
+    const hit = raycastVoxel(origin, forward, 8);
+    if (hit) setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0);
+  }, ()=>{});
+  bindTouchBtn(mPlace, ()=> {
+    const origin = camera.position.clone();
+    const fx = Math.sin(yaw) * Math.cos(pitch);
+    const fy = Math.sin(pitch);
+    const fz = Math.cos(yaw) * Math.cos(pitch);
+    const forward = new BABYLON.Vector3(fx, fy, fz).normalize();
+    const hit = raycastVoxel(origin, forward, 8);
+    if (hit){
+      const p = hit.pos, f = hit.face;
+      const placeX = p.x + f.x, placeY = p.y + f.y, placeZ = p.z + f.z;
+      setBlock(placeX, placeY, placeZ, selected);
+    }
+  }, ()=>{});
 
   // --- UI palette ---
   const paletteEl = document.getElementById('palette');
@@ -299,10 +418,7 @@
   }
   updatePalette();
 
-  // --- world instance management note: instances map tracks instanced meshes per block coordinate ---
-  // Already handled in setBlock()
-
-  // --- main loop (physics + rendering) ---
+  // --- main loop ---
   const gravity = -30;
   let last = performance.now();
   engine.runRenderLoop(() => {
@@ -310,7 +426,7 @@
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
 
-    // movement vector from yaw/pitch
+    // movement
     const forwardDir = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const rightDir = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
     let move = new BABYLON.Vector3(0,0,0);
@@ -321,42 +437,33 @@
     if (move.lengthSquared() > 0){
       move.normalize();
       move.scaleInPlace(player.speed * dt);
-      // Fix hitbox stuttering: resolve X and Z separately
-      // attempt X
+      // resolve X then Z separately
       player.pos.x += move.x;
       const minX = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
       const maxX = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-      if (boxCollides(minX, maxX)){
-        player.pos.x -= move.x;
-      }
-      // attempt Z
+      if (boxCollides(minX, maxX)) player.pos.x -= move.x;
       player.pos.z += move.z;
       const minZ = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
       const maxZ = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-      if (boxCollides(minZ, maxZ)){
-        player.pos.z -= move.z;
-      }
+      if (boxCollides(minZ, maxZ)) player.pos.z -= move.z;
     }
 
     // gravity
     player.vel.y += gravity * dt;
-    const prevY = player.pos.y;
     player.pos.y += player.vel.y * dt;
 
-    // vertical collision resolution (improved)
+    // vertical collision
     const minV = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
     const maxV = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
     if (boxCollides(minV, maxV)){
-      // if moving up (hit ceiling)
       if (player.vel.y > 0){
-        // place player just below the collided top block
-        const top = Math.floor(player.pos.y + player.height);
-        player.pos.y = top - player.height - 0.001;
+        // hit ceiling: push down slightly
+        player.pos.y -= 0.05;
         player.vel.y = 0;
       } else {
-        // falling: place player on top of block
-        const below = Math.floor(player.pos.y);
-        player.pos.y = below + 1e-3;
+        // landed on ground: snap to top of block
+        const foot = Math.floor(player.pos.y);
+        player.pos.y = foot + 1e-3;
         player.vel.y = 0;
         player.onGround = true;
       }
@@ -364,29 +471,26 @@
       player.onGround = false;
     }
 
-    // small step correction to avoid sinking due to float error: keep player slightly above ground
+    // small correction
     if (player.onGround){
-      // ensure player is not inside the block below
       const footY = Math.floor(player.pos.y - 0.01);
       if (getBlock(Math.floor(player.pos.x), footY, Math.floor(player.pos.z)) !== 0){
         player.pos.y = footY + 1 + 1e-3;
       }
     }
 
-    // place camera
+    // set camera
     camera.position.set(player.pos.x, player.pos.y + 0.4, player.pos.z);
 
     scene.render();
   });
 
-  // window resizing
-  window.addEventListener('resize', ()=> engine.resize() );
+  window.addEventListener('resize', ()=> engine.resize());
 
-  // regenerate button (R)
-  // small help UI hooking already created via keyboard 'r'
+  // expose regenerate and spawn
+  window.regenerate = () => { generateTerrain(); spawnPlayerAt(player.pos.x, player.pos.z); };
 
-  // done
+  // ...existing code...
 })();
 </script>
 </body>
-</html>
