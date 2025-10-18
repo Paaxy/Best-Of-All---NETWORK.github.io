@@ -41,7 +41,8 @@ nav a {
     font-weight: bold;
 }
 
-nav a:hover {
+nav a:hover,
+nav a:focus {
     text-decoration: underline;
 }
 
