@@ -1,4 +1,4 @@
-body {
+        body {
             font-family: Arial, sans-serif;
             line-height: 1.6;
             margin: 0;
@@ -7,8 +7,8 @@ body {
             color: #333;
         }
         header {
-            background: #333;
-            color: #fff;
+            background: #ffffff;
+            color: #000000;
             padding: 10px 20px;
             text-align: center;
         }
@@ -35,7 +35,7 @@ body {
             color: #555;
         }
         nav ul {
-            list-style: none;
+            list-style: bullet;
             padding: 0;
             display: flex;
             justify-content: center;
