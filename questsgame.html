@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Quests — Simple Quests Game</title>
+<style>
+  :root{--bg:#f3f6fb;--card:#fff;--accent:#1976d2;--danger:#d32f2f;--muted:#6b7280}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#111;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+  .wrap{width:100%;max-width:980px}
+  header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  h1{margin:0;font-size:20px}
+  .hud{display:flex;gap:12px;align-items:center}
+  .stat{background:var(--card);padding:8px 12px;border-radius:8px;box-shadow:0 4px 14px rgba(18,38,63,0.06)}
+  .grid{display:grid;grid-template-columns:1fr 360px;gap:16px}
+  .panel{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 6px 20px rgba(16,24,40,0.06)}
+  .quests-list{display:flex;flex-direction:column;gap:10px}
+  .quest{display:flex;justify-content:space-between;align-items:center;padding:10px;border-radius:8px;background:#fbfdff;border:1px solid #eef3fb}
+  .quest .meta{display:flex;flex-direction:column}
+  .buttons{display:flex;gap:8px}
+  button{background:var(--accent);color:#fff;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:600}
+  button.alt{background:#9ca3af}
+  .small{font-size:13px;color:var(--muted)}
+  canvas{display:block;width:100%;height:auto;border-radius:8px;background:linear-gradient(180deg,#e6f0ff,#f8fbff)}
+  .center{display:flex;align-items:center;justify-content:center}
+  .log{max-height:240px;overflow:auto;padding:8px;border-radius:8px;background:#fbfdff;border:1px solid #eef3fb;font-size:13px}
+  .reward{color:green;font-weight:700}
+  @media (max-width:880px){ .grid{grid-template-columns:1fr} .hud{flex-direction:column;align-items:flex-start;gap:8px} }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Quests — Simple Quests Game</h1>
+      <div class="hud">
+        <div class="stat">Gold: <strong id="gold">0</strong></div>
+        <div class="stat">XP: <strong id="xp">0</strong></div>
+        <div class="stat">Stamina: <strong id="stamina">5</strong></div>
+        <button id="reset" class="alt">Reset</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <div class="panel">
+        <h3>Available Quests</h3>
+        <div class="quests-list" id="quests"></div>
+      </div>
+
+      <div class="panel">
+        <h3>Active Quest</h3>
+        <div id="activeArea" class="center" style="min-height:180px">
+          <div class="small">Pick a quest to start</div>
+        </div>
+
+        <h4 style="margin-top:12px">Game Log</h4>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const STORAGE_KEY = 'quests-game-v1';
+  const goldEl = document.getElementById('gold');
+  const xpEl = document.getElementById('xp');
+  const staminaEl = document.getElementById('stamina');
+  const questsEl = document.getElementById('quests');
+  const activeArea = document.getElementById('activeArea');
+  const logEl = document.getElementById('log');
+  const resetBtn = document.getElementById('reset');
+
+  const DEFAULT_STATE = { gold:0, xp:0, stamina:5 };
+  let state = loadState();
+  let activeQuest = null;
+  let timer = null;
+
+  const QUESTS = [
+    { id:'target', title:'Target Rush', desc:'Click / tap 10 targets in 12s', stamina:1, reward:{gold:20,xp:15} },
+    { id:'reaction', title:'Reaction Test', desc:'Wait for GO then tap quickly', stamina:1, reward:{gold:12,xp:8} },
+    { id:'choice', title:'Treasure Choice', desc:'Pick a safe chest (1/3 chance)', stamina:1, reward:{gold:30,xp:10} },
+    { id:'explore', title:'Explore Walk', desc:'Auto walk — small reward after 6s', stamina:0, reward:{gold:5,xp:3} }
+  ];
+
+  function saveState(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
+  function loadState(){ try{ return Object.assign({}, DEFAULT_STATE, JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')); }catch{ return Object.assign({}, DEFAULT_STATE); } }
+
+  function renderHUD(){ goldEl.textContent = state.gold; xpEl.textContent = state.xp; staminaEl.textContent = state.stamina; }
+
+  function log(msg){ const d = document.createElement('div'); d.textContent = '['+ new Date().toLocaleTimeString() +'] '+ msg; logEl.prepend(d); }
+
+  function renderQuests(){
+    questsEl.innerHTML = '';
+    QUESTS.forEach(q => {
+      const li = document.createElement('div'); li.className = 'quest';
+      li.innerHTML = `<div class="meta"><strong>${q.title}</strong><div class="small">${q.desc}</div></div>
+        <div class="buttons"><div class="small" style="align-self:center">Stamina: ${q.stamina}</div><button data-id="${q.id}">Start</button></div>`;
+      questsEl.appendChild(li);
+    });
+    // attach handlers
+    questsEl.querySelectorAll('button').forEach(b => b.addEventListener('click', () => startQuest(b.dataset.id)));
+  }
+
+  function startQuest(id){
+    if (activeQuest) { log('Finish current quest first'); return; }
+    const quest = QUESTS.find(q => q.id === id);
+    if (!quest) return;
+    if (state.stamina < quest.stamina) { log('Not enough stamina'); return; }
+    // consume stamina
+    state.stamina -= quest.stamina; saveState(); renderHUD();
+    log('Started quest: ' + quest.title);
+    activeQuest = { quest, progress:0, started:Date.now() };
+    showActiveUI(quest);
+  }
+
+  function finishQuest(success){
+    if (!activeQuest) return;
+    const q = activeQuest.quest;
+    activeQuest = null;
+    clearActiveUI();
+    if (success){
+      state.gold += q.reward.gold;
+      state.xp += q.reward.xp;
+      saveState(); renderHUD();
+      log(`Quest complete! +${q.reward.gold} gold, +${q.reward.xp} XP`);
+    } else {
+      log('Quest failed.');
+    }
+  }
+
+  function showActiveUI(q){
+    activeArea.innerHTML = '';
+    if (q.id === 'target') { startTargetRush(); }
+    else if (q.id === 'reaction') { startReaction(); }
+    else if (q.id === 'choice') { startChoice(); }
+    else if (q.id === 'explore') { startExplore(); }
+  }
+
+  function clearActiveUI(){
+    activeArea.innerHTML = '<div class="small">Pick a quest to start</div>';
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+
+  // --- Target Rush mini-game (canvas) ---
+  function startTargetRush(){
+    const canvas = document.createElement('canvas');
+    canvas.width = 720; canvas.height = 360;
+    canvas.style.maxWidth = '100%';
+    activeArea.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    let targets = [];
+    let hits = 0;
+    const needed = 10;
+    let timeLeft = 12; // seconds
+
+    function spawn(){ const r = 18 + Math.random()*18; targets.push({ x: r + Math.random()*(canvas.width-2*r), y: r + Math.random()*(canvas.height-2*r), r, t: Date.now() }); }
+    // initial spawn
+    for(let i=0;i<4;i++) spawn();
+
+    function draw(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // background
+      ctx.fillStyle = '#eaf6ff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+      // targets
+      targets.forEach(t=>{
+        ctx.beginPath();
+        ctx.fillStyle = '#ff5252';
+        ctx.arc(t.x,t.y,t.r,0,Math.PI*2);
+        ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = '#8b1f1f'; ctx.stroke();
+      });
+      // UI
+      ctx.fillStyle = '#0b3b66'; ctx.font = '18px system-ui';
+      ctx.fillText(`Hits: ${hits}/${needed}`, 12, 22);
+      ctx.fillText(`Time: ${Math.max(0,Math.ceil(timeLeft))}s`, 12, 44);
+    }
+
+    function tick(dt){
+      // spawn occasionally
+      if (Math.random() < 0.04) spawn();
+      // remove old targets >6s
+      const now = Date.now();
+      targets = targets.filter(t => now - t.t < 6000);
+      timeLeft -= dt;
+      draw();
+      if (hits >= needed) { finishQuest(true); return true; }
+      if (timeLeft <= 0) { finishQuest(false); return true; }
+      return false;
+    }
+
+    let last = performance.now();
+    function loop(ts){
+      const dt = (ts - last)/1000; last = ts;
+      if (tick(dt)) return;
+      requestAnimationFrame(loop);
+    }
+    requestAnimationFrame(loop);
+
+    // input
+    canvas.addEventListener('pointerdown', function onPointer(e){
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * (canvas.width / rect.width);
+      const y = (e.clientY - rect.top) * (canvas.height / rect.height);
+      // check targets front-to-back
+      for(let i=targets.length-1;i>=0;i--){
+        const t = targets[i];
+        const dx = x - t.x, dy = y - t.y;
+        if (dx*dx + dy*dy <= t.r*t.r){
+          targets.splice(i,1); hits++; break;
+        }
+      }
+    });
+
+    // fallback timeout safety
+    timer = setInterval(()=>{},1000);
+  }
+
+  // --- Reaction Test ---
+  function startReaction(){
+    activeArea.innerHTML = '';
+    const box = document.createElement('div');
+    box.style.width = '100%';
+    box.style.padding = '18px';
+    box.style.borderRadius = '10px';
+    box.style.textAlign = 'center';
+    box.style.background = '#fff';
+    box.innerHTML = `<div id="rtText" style="font-weight:700">Get ready...</div>
+      <div class="small" style="margin-top:6px">Wait for <strong>GO</strong>, then tap/click quickly</div>
+      <div style="margin-top:12px"><button id="rtBtn" class="alt">Cancel</button></div>`;
+    activeArea.appendChild(box);
+    const rtText = box.querySelector('#rtText');
+    const rtBtn = box.querySelector('#rtBtn');
+
+    let stateRT = 'wait'; // wait -> go -> done
+    let goTime = 0;
+    const delay = 1000 + Math.random()*2400;
+    const startTime = performance.now();
+    const onGo = () => {
+      stateRT = 'go'; rtText.textContent = 'GO!'; rtText.style.color = '#0b6d2b';
+      goTime = performance.now();
+    };
+    const timed = setTimeout(onGo, delay);
+
+    function onUser(){
+      if (stateRT === 'wait'){ // too early
+        clearTimeout(timed); finishQuest(false); return;
+      }
+      if (stateRT === 'go'){ const t = performance.now() - goTime; const success = t < 400; finishQuest(success); }
+    }
+    function cancel(){ clearTimeout(timed); finishQuest(false); }
+
+    // attach
+    activeArea.addEventListener('pointerdown', onUser, { once:true });
+    rtBtn.addEventListener('click', cancel);
+    // keyboard
+    const kb = (e)=>{ if (e.key === ' ' || e.key === 'Enter') onUser(); };
+    window.addEventListener('keydown', kb, { once:true });
+
+    // safety
+    timer = setInterval(()=>{},1000);
+  }
+
+  // --- Choice (pick chest) ---
+  function startChoice(){
+    activeArea.innerHTML = '';
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.gap = '12px';
+    container.style.justifyContent = 'center';
+    container.style.width = '100%';
+    container.innerHTML = `<button class="alt">Chest 1</button><button class="alt">Chest 2</button><button class="alt">Chest 3</button>`;
+    activeArea.appendChild(container);
+
+    const buttons = container.querySelectorAll('button');
+    const safe = Math.floor(Math.random()*3);
+    buttons.forEach((b,i) => b.addEventListener('click', () => {
+      buttons.forEach(x=>x.disabled=true);
+      if (i === safe){ // success
+        setTimeout(()=> finishQuest(true), 300);
+      } else {
+        setTimeout(()=> finishQuest(false), 300);
+      }
+    }));
+  }
+
+  // --- Explore (auto timed) ---
+  function startExplore(){
+    activeArea.innerHTML = `<div class="small">Exploring... relax for 6 seconds</div>`;
+    let t = 6;
+    const interval = setInterval(()=> {
+      t--;
+      if (t <= 0){ clearInterval(interval); finishQuest(true); }
+      activeArea.innerHTML = `<div class="small">Exploring... ${t}s</div>`;
+    },1000);
+    timer = interval;
+  }
+
+  // reset
+  resetBtn.addEventListener('click', ()=> {
+    localStorage.removeItem(STORAGE_KEY);
+    state = Object.assign({}, DEFAULT_STATE); renderHUD(); log('Progress reset');
+  });
+
+  // initialize
+  renderHUD(); renderQuests();
+  log('Welcome! Pick a quest.');
+
+  // save periodically
+  setInterval(saveState, 2000);
+})();
+</script>  
+</body>
+</html>
