@@ -3,1005 +3,360 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Mini Minecraft Clone — Single File</title>
+<title>Mini Minecraft Clone — Single File (Babylon)</title>
 
-<!-- Three.js from CDN -->
-<script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.154.0/examples/js/controls/PointerLockControls.js"></script>
+<!-- Babylon.js -->
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
 
 <style>
-  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:#87ceeb}
-  #ui{position:fixed;left:12px;top:12px;z-index:999;color:#042;backdrop-filter:blur(4px)}
-  #ui .row{margin-bottom:6px}
-  #toolbar{position:fixed;right:12px;top:12px;display:flex;flex-direction:column;gap:6px;z-index:999}
-  .btn{background:#fff;padding:6px 8px;border-radius:6px;border:1px solid #ccc;cursor:pointer}
-  #hud{position:fixed;left:50%;transform:translateX(-50%);top:10px;background:rgba(255,255,255,0.85);padding:6px 10px;border-radius:8px;z-index:999}
-  #touch{position:fixed;left:12px;bottom:12px;z-index:999;display:none}
-  #touch .dir{display:flex;gap:6px}
-  #touch button{width:56px;height:56px;border-radius:8px;border:none;background:rgba(255,255,255,0.9)}
-  canvas{display:block}
-  #blockPalette{display:flex;gap:6px}
-  .slot{width:40px;height:40px;border-radius:6px;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-weight:700;color:#222}
-  .slot.sel{outline:3px solid #222}
-  .legend{font-size:12px;color:#043}
-  @media (max-width:800px){ #touch{display:block} #toolbar{right:6px;top:6px} }
+  html,body{height:100%;margin:0;overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Arial}
+  #renderCanvas{width:100%;height:100%;display:block;background:linear-gradient(#87ceeb, #cde9ff)}
+  #hud{position:fixed;left:12px;top:12px;z-index:20;background:rgba(255,255,255,0.8);padding:8px;border-radius:8px}
+  #palette{display:flex;gap:6px;margin-top:8px}
+  .slot{width:36px;height:36px;border-radius:6px;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-weight:700;cursor:pointer}
+  .slot.sel{outline:3px solid #111}
+  #centerCross{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:rgba(0,0,0,0.6);z-index:10;pointer-events:none}
+  #help{position:fixed;right:12px;top:12px;background:rgba(255,255,255,0.85);padding:8px;border-radius:8px;font-size:13px}
+  button{cursor:pointer}
 </style>
 </head>
 <body>
-  <div id="hud">Click to play — WASD to move, mouse to look, LMB break, RMB place, 1-9 select block</div>
-
-  <div id="ui">
-    <div class="row legend">Blocks:</div>
-    <div id="blockPalette"></div>
+  <canvas id="renderCanvas"></canvas>
+  <div id="hud">
+    <div>Selected: <span id="selName">Grass</span></div>
+    <div id="palette"></div>
+    <div style="margin-top:8px">Break: LMB — Place: RMB — 1-9 select</div>
   </div>
-
-  <div id="toolbar">
-    <button id="resetBtn" class="btn">Reset World</button>
-    <div style="display:flex;gap:6px">
-      <button id="breakBtn" class="btn">Break</button>
-      <button id="placeBtn" class="btn">Place</button>
-    </div>
-  </div>
-
-  <div id="touch">
-    <div class="dir">
-      <button id="tForward">▲</button>
-      <button id="tLeft">◀</button>
-      <button id="tBack">▼</button>
-      <button id="tRight">▶</button>
-    </div>
-    <div style="margin-top:6px;display:flex;gap:6px">
-      <button id="tJump">Jump</button>
-      <button id="tBreak">Break</button>
-      <button id="tPlace">Place</button>
-    </div>
-  </div>
+  <div id="help">Click to lock pointer. WASD move, Space jump</div>
+  <div id="centerCross"></div>
 
 <script>
-/*
-  Minimal voxel world (single-file) using Three.js.
-  - Colored blocks, no textures
-  - Basic gravity + AABB collisions
-  - Break (LMB) and Place (RMB) via raycast
-  - WASD + PointerLock controls + touch controls
-  - Small procedurally generated terrain with trees and ores
-*/
+(() => {
+  const canvas = document.getElementById('renderCanvas');
+  const engine = new BABYLON.Engine(canvas, true, { preserveDrawingBuffer: false, stencil: true });
+  const scene = new BABYLON.Scene(engine);
+  scene.clearColor = new BABYLON.Color3(0.53,0.8,1);
 
-// --- Config / block types ---
-// Removed duplicate declaration of BLOCKS
-/*
-  { id: 0, name: 'Air', color: null },
-  { id: 1, name: 'Grass', color: 0x3db24a },
-  { id: 2, name: 'Dirt', color: 0x8b5a2b },
-  { id: 3, name: 'Stone', color: 0x999999 },
-  { id: 4, name: 'Coal', color: 0x0b0b0b },
-  { id: 5, name: 'Iron', color: 0xd6cfc7 },
-  { id: 6, name: 'Redstone', color: 0xc92a2a },
-  { id: 7, name: 'Gold', color: 0xf2d13d },
-  { id: 8, name: 'Water', color: 0x3f8efc },
-  { id: 9, name: 'Log', color: 0x4b2e19 },
-  { id: 10, name: 'Leaves', color: 0x1f5f2f }
-*/
+  // --- Block definitions (colors per request) ---
+  // 0=air
+  const BLOCKS = [
+    { id:0, name:'Air', color:null },
+    { id:1, name:'Grass', color:0x008f11 },        // green
+    { id:2, name:'Dirt', color:0x8b5a2b },         // brown
+    { id:3, name:'Stone', color:0x999999 },        // gray stone
+    { id:4, name:'Coal', color:0x0b0b0b },         // black
+    { id:5, name:'Iron', color:0xd2b48c },         // light brown/gray-ish
+    { id:6, name:'Redstone', color:0xff3333 },     // red
+    { id:7, name:'Gold', color:0xffd000 },         // yellow
+    { id:8, name:'Water', color:0x3f8efc },        // blue
+    { id:9, name:'Log', color:0x4b2e19 },          // dark brown logs
+    { id:10,name:'Leaves', color:0x114411 }        // dark green leaves
+  ];
 
-// world dimensions (radius)
-// Removed duplicate declarations of SIZE, HEIGHT, and SCALE
+  // world parameters
+  const R = 22; // radius x/z (world will be roughly (2R+1)^2)
+  const MAX_H = 18; // height
+  const world = new Map(); // key -> id
+  const instances = new Map(); // key -> InstancedMesh (for removal)
+  function key(x,y,z){ return `${x},${y},${z}`; }
+  function getBlock(x,y,z){ return world.get(key(x,y,z)) || 0; }
+  function setBlock(x,y,z,id){
+    const k = key(x,y,z);
+    const old = world.get(k) || 0;
+    if (old === id) return;
+    // remove old instance if present
+    const oldInst = instances.get(k);
+    if (oldInst){ try{ oldInst.dispose(); } catch(e){} instances.delete(k); }
+    if (id === 0){ world.delete(k); return; }
+    world.set(k,id);
+    // create instance for mesh pool
+    const base = meshPool.get(id);
+    if (base){
+      const inst = base.createInstance(k);
+      inst.position.set(x + 0.5, y + 0.5, z + 0.5);
+      inst.rotationQuaternion = null;
+      inst.isPickable = false;
+      instances.set(k, inst);
+    }
+  }
 
-// --- Three.js setup ---
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x87ceeb, 0.0025);
+  // --- basic scene: light + camera ---
+  const hemi = new BABYLON.HemisphericLight('h', new BABYLON.Vector3(0.6,1,0.4), scene);
+  hemi.intensity = 0.9;
+  const dir = new BABYLON.DirectionalLight('d', new BABYLON.Vector3(-0.5,-1,0.5), scene);
+  dir.position = new BABYLON.Vector3(40,60,20);
+  dir.intensity = 0.6;
 
-// Removed duplicate renderer declaration
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio ? window.devicePixelRatio : 1);
-document.body.appendChild(renderer.domElement);
+  // camera/player (we implement our own physics)
+  const camera = new BABYLON.FreeCamera('playerCam', new BABYLON.Vector3(0,6,0), scene);
+  camera.fov = 0.9;
+  camera.attachControl(canvas, true);
+  // pointer lock on click
+  canvas.addEventListener('click', ()=> {
+    if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
+  });
+  // disable default camera inputs (we handle manually)
+  camera.inputs.clear();
 
-// Removed duplicate camera declaration
-camera.position.set(0, 6, 0);
+  // simple cursor orientation via pointerlock mousemove
+  let yaw = 0, pitch = 0;
+  const PI_2 = Math.PI/2;
+  document.addEventListener('pointerlockchange', () => {
+    // nothing
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement !== canvas) return;
+    const sensitivity = 0.0022;
+    yaw -= e.movementX * sensitivity;
+    pitch -= e.movementY * sensitivity;
+    pitch = Math.max(-PI_2 + 0.1, Math.min(PI_2 - 0.1, pitch));
+    camera.rotation = new BABYLON.Vector3(pitch, yaw, 0);
+  });
 
-// lights
-// Removed duplicate hemi declaration
-scene.add(hemi);
-// Removed duplicate dir declaration
-dir.position.set(5, 10, 7);
-scene.add(dir);
-
-// ground helper plane under world for shadows/visual
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshPhongMaterial({ color:0x6db76b }));
-ground.rotation.x = -Math.PI/2;
-ground.position.y = -0.5;
-scene.add(ground);
-
-// --- World data store (sparse map) ---
-// Removed duplicate world declaration
-
-function key(x,y,z){ return `${x},${y},${z}`; }
-function getBlock(x,y,z){ return world.get(key(x,y,z)) || 0; }
-function setBlock(x,y,z,id){
-  if (id === 0) world.delete(key(x,y,z));
-  else world.set(key(x,y,z), id);
-}
-
-// --- Mesh pool per block type (merged geometry) ---
-// Removed duplicate blockMeshes declaration
-// Removed duplicate singleGeometry declaration
-singleGeometry.translate(0.5*SCALE, 0.5*SCALE, 0.5*SCALE); // align to integer grid
-
-function buildMeshes(){
-  // clear existing meshes
-  blockMeshes.forEach(m => scene.remove(m));
-  blockMeshes.clear();
-
-  // for each block type (except air), build an InstancedMesh with max count estimate
+  // --- mesh pool (one base box per block type) ---
+  const meshPool = new Map();
   for (let b of BLOCKS){
     if (b.id === 0) continue;
-    const mat = new THREE.MeshLambertMaterial({ color: b.color });
-    // use dynamic merging approach: create a group to hold many single meshes
-    const group = new THREE.Group();
-    group.userData = { id: b.id, mat };
-    scene.add(group);
-    blockMeshes.set(b.id, group);
+    const mat = new BABYLON.StandardMaterial('m'+b.id, scene);
+    mat.diffuseColor = BABYLON.Color3.FromHexString('#' + b.color.toString(16).padStart(6,'0'));
+    mat.specularColor = new BABYLON.Color3(0.1,0.1,0.1);
+    mat.backFaceCulling = false;
+    const box = BABYLON.MeshBuilder.CreateBox('box'+b.id, { size: 1 }, scene);
+    box.material = mat;
+    box.isVisible = false; // base not visible; instances will be visible
+    box.checkCollisions = true;
+    meshPool.set(b.id, box);
   }
-}
 
-// place a block mesh at position (adds a Mesh to group's children)
-function addBlockMesh(x,y,z,id){
-  // skip air
-  if (id === 0) return;
-  const group = blockMeshes.get(id);
-  if (!group) return;
-  const m = new THREE.Mesh(singleGeometry, group.userData.mat);
-  m.position.set(x*SCALE, y*SCALE, z*SCALE);
-  m.updateMatrix();
-  m.matrixAutoUpdate = false;
-  group.add(m);
-}
+  // ground/below plane (invisible collider floor for out-of-range)
+  const floor = BABYLON.MeshBuilder.CreateGround('floor', {width:1000, height:1000}, scene);
+  floor.position.y = -100;
+  floor.isVisible = false;
 
-// rebuild visible geometry from world map (simple, not optimized)
-function rebuildWorldMeshes(){
-  // clear groups
-  blockMeshes.forEach(group => { while(group.children.length) group.remove(group.children[0]); });
-  // iterate world map
-  for (let [k, id] of world.entries()){
-    const [x,y,z] = k.split(',').map(Number);
-    // cull far blocks
-    if (Math.abs(x) > SIZE*1.2 || Math.abs(z) > SIZE*1.2 || y < -10 || y > HEIGHT+6) continue;
-    addBlockMesh(x, y, z, id);
-  }
-}
-
-// --- simple procedural terrain ---
-function generateTerrain(){
-  world.clear();
-  const seed = Math.random()*10000;
+  // --- terrain generation (simple smooth noise) ---
   function noise(x,z){
-    // simple pseudo-noise using sin / frag to make gentle hills
-    return Math.floor((Math.sin((x+seed)*0.12) + Math.cos((z-seed)*0.11))*2.2 + 6 + (Math.sin((x+z+seed)*0.07)*2));
+    return (Math.sin(x*0.12 + z*0.07) + Math.cos((x - z)*0.08) + Math.sin((x*0.15 - z*0.11)*0.9))*1.6;
   }
-  for (let x = -SIZE; x <= SIZE; x++){
-    for (let z = -SIZE; z <= SIZE; z++){
-      const h = Math.max(1, noise(x,z));
-      for (let y = 0; y <= h; y++){
-        // top block grass, below dirt, occasional stone/ores
-        let id = 2; // dirt
-        if (y === h) id = 1; // grass
-        else if (y <= h - 4) {
-          id = 3; // stone
-          // ores occasionally
-          const r = Math.random();
-          if (r < 0.01) id = 4; // coal
-          else if (r < 0.015) id = 5; // iron
-          else if (r < 0.017) id = 6; // redstone
-          else if (r < 0.018) id = 7; // gold
+  function generateTerrain(){
+    world.clear();
+    // remove existing instances
+    for (let inst of instances.values()){ try{ inst.dispose(); }catch{} }
+    instances.clear();
+    for (let x = -R; x <= R; x++){
+      for (let z = -R; z <= R; z++){
+        const h = Math.floor(6 + noise(x,z) * 3 + Math.sin((x*z)*0.01));
+        for (let y = 0; y <= h; y++){
+          let id = 2; // dirt
+          if (y === h) id = 1; // grass
+          else if (y <= h - 4) {
+            id = 3; // stone
+            const r = Math.random();
+            if (r < 0.012) id = 4; // coal
+            else if (r < 0.018) id = 5; // iron
+            else if (r < 0.02) id = 6; // redstone
+            else if (r < 0.022) id = 7; // gold
+          }
+          setBlock(x,y,z,id);
         }
-        setBlock(x,y,z,id);
-      }
-      // water low areas
-      if (noise(x,z) < 5){
-        for (let y = noise(x,z)+1; y <= 3; y++) setBlock(x,y,z,8); // water up to level 3
-      }
-      // random trees
-      if (Math.random() < 0.05 && noise(x,z) > 4){
-        const trunkHeight = 3 + Math.floor(Math.random()*2);
-        for (let t=1; t<=trunkHeight; t++) setBlock(x, noise(x,z)+t, z, 9); // log
-        const top = noise(x,z)+trunkHeight;
-        for (let ox=-2; ox<=2; ox++) for (let oz=-2; oz<=2; oz++){
-          if (Math.abs(ox) + Math.abs(oz) < 4) setBlock(x+ox, top, z+oz, 10); // leaves
+        // water fill if low
+        const hval = Math.floor(6 + noise(x,z) * 3);
+        if (hval < 4){
+          for (let y = hval+1; y <= 4; y++) setBlock(x,y,z,8);
+        }
+        // trees
+        if (Math.random() < 0.04 && noise(x,z) > -1){
+          const trunk = 3 + Math.floor(Math.random()*2);
+          const baseH = Math.floor(6 + noise(x,z)*3);
+          for (let t=1; t<=trunk; t++) setBlock(x, baseH + t, z, 9);
+          const top = baseH + trunk;
+          for (let ox=-2; ox<=2; ox++) for (let oz=-2; oz<=2; oz++){
+            if (Math.abs(ox)+Math.abs(oz) < 4) setBlock(x+ox, top, z+oz, 10);
+          }
         }
       }
     }
   }
-}
 
-// Removed duplicate player declaration
-/*
-  pos: new THREE.Vector3(0, 10, 5),
-  vel: new THREE.Vector3(),
-  speed: 6,
-  height: 1.8,
-  width: 0.6,
-  onGround: false
-*/
+  generateTerrain();
 
-// Removed duplicate raycaster declaration
-// Removed duplicate pointer declaration
-// Removed duplicate blockSelected declaration
+  // --- player physics (simple AABB) ---
+  const player = {
+    pos: new BABYLON.Vector3(0, 10, 0),
+    vel: new BABYLON.Vector3(0, 0, 0),
+    speed: 6,
+    width: 0.6,
+    height: 1.8,
+    onGround: false
+  };
 
-// collision test: returns true if box (min,max) intersects any block
-function boxCollides(min, max){
-  const x0 = Math.floor(min.x), x1 = Math.floor(max.x);
-  const y0 = Math.floor(min.y), y1 = Math.floor(max.y);
-  const z0 = Math.floor(min.z), z1 = Math.floor(max.z);
-  for (let x = x0; x <= x1; x++){
-    for (let y = y0; y <= y1; y++){
-      for (let z = z0; z <= z1; z++){
-        if (getBlock(x,y,z) !== 0) return true;
+  // simple AABB collision check against blocks in world
+  function boxCollides(min, max){
+    const x0 = Math.floor(min.x), x1 = Math.floor(max.x);
+    const y0 = Math.floor(min.y), y1 = Math.floor(max.y);
+    const z0 = Math.floor(min.z), z1 = Math.floor(max.z);
+    for (let x = x0; x <= x1; x++){
+      for (let y = y0; y <= y1; y++){
+        for (let z = z0; z <= z1; z++){
+          if (getBlock(x,y,z) !== 0) return true;
+        }
       }
     }
+    return false;
   }
-  return false;
-}
 
-// resolve collisions and update position
-function physicsStep(dt, input){
-  // apply horizontal movement input
-  const forward = input.forward?1:0, back = input.back?1:0, left = input.left?1:0, right = input.right?1:0;
-  const dir = new THREE.Vector3();
-  // yaw from camera rotation (y axis)
-  const yaw = camera.rotation.y;
-  const sin = Math.sin(yaw), cos = Math.cos(yaw);
-  const moveX = (-forward + back) * -sin + (left - right) * -cos;
-  const moveZ = (forward - back) * -cos + (left - right) * sin;
-  dir.set(moveX, 0, moveZ);
-  if (dir.lengthSq() > 0) {
-    dir.normalize();
-    dir.multiplyScalar(player.speed * dt);
-    player.pos.x += dir.x;
-    player.pos.z += dir.z;
-    // collision on XZ
-    const min = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-    const max = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-    if (boxCollides(min, max)){
-      // undo movement
-      player.pos.x -= dir.x;
-      player.pos.z -= dir.z;
+  // raycast through voxel grid (step along ray) to pick block and face normal
+  function raycastVoxel(origin, dir, maxDist=8){
+    const step = 0.1;
+    let t = 0;
+    while (t < maxDist){
+      const p = origin.add(dir.scale(t));
+      const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z);
+      const id = getBlock(bx,by,bz);
+      if (id !== 0){
+        const local = p.subtract(new BABYLON.Vector3(bx+0.5, by+0.5, bz+0.5));
+        const ax = Math.abs(local.x), ay = Math.abs(local.y), az = Math.abs(local.z);
+        let face = new BABYLON.Vector3(0,0,0);
+        if (ax > ay && ax > az) face.x = local.x > 0 ? 1 : -1;
+        else if (ay > ax && ay > az) face.y = local.y > 0 ? 1 : -1;
+        else face.z = local.z > 0 ? 1 : -1;
+        return { pos: {x:bx,y:by,z:bz}, face };
+      }
+      t += step;
     }
+    return null;
   }
 
-  // gravity
-  player.vel.y -= 30 * dt;
-  player.pos.y += player.vel.y * dt;
+  // --- input ---
+  const input = { forward:false, back:false, left:false, right:false, jump:false };
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'w') input.forward = true;
+    if (e.key === 's') input.back = true;
+    if (e.key === 'a') input.left = true;
+    if (e.key === 'd') input.right = true;
+    if (e.code === 'Space') { if (player.onGround) player.vel.y = 9; }
+    if (/^[1-9]$/.test(e.key)){ const idx = Number(e.key); if (idx < BLOCKS.length) { selected = idx; updatePalette(); } }
+    if (e.key === 'r') { generateTerrain(); }
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'w') input.forward = false;
+    if (e.key === 's') input.back = false;
+    if (e.key === 'a') input.left = false;
+    if (e.key === 'd') input.right = false;
+  });
 
-  // collision with terrain vertically
-  const min = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-  const max = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-  if (boxCollides(min, max)){
-    // push up until no collision (simple resolution)
-    // step up in small increments
-    player.pos.y = Math.ceil(player.pos.y);
-    player.vel.y = 0;
-    player.onGround = true;
-  } else {
-    player.onGround = false;
-  }
-}
-
-// --- input & controls ---
-// Removed duplicate input declaration
-
-// Removed duplicate declarations of input and controls
-
-controls.addEventListener('lock', () => { document.getElementById('hud').style.display = 'none'; });
-controls.addEventListener('unlock', () => { document.getElementById('hud').style.display = 'block'; });
-
-// keyboard
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'w') input.forward = true;
-  if (e.key === 's') input.back = true;
-  if (e.key === 'a') input.left = true;
-  if (e.key === 'd') input.right = true;
-  if (e.code === 'Space') { if (player.onGround) player.vel.y = 10; }
-  // block selection 1..9
-  if (/^[1-9]$/.test(e.key)) {
-    const idx = Number(e.key);
-    if (idx < BLOCKS.length) blockSelected = idx;
-    updatePaletteSelection();
-  }
-  if (e.key === 'r') regenerate();
-});
-
-window.addEventListener('keyup', (e) => {
-  if (e.key === 'w') input.forward = false;
-  if (e.key === 's') input.back = false;
-  if (e.key === 'a') input.left = false;
-  if (e.key === 'd') input.right = false;
-});
-
-// pointer actions: left click break, right click place
-renderer.domElement.addEventListener('pointerdown', (ev) => {
-  if (!controls.isLocked) return;
-  pointer.x = (ev.clientX / renderer.domElement.clientWidth) * 2 - 1;
-  pointer.y = -(ev.clientY / renderer.domElement.clientHeight) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock();
-  if (!hit) return;
-  const { pos, face } = hit;
-  if (ev.button === 0){ // left -> break
-    setBlock(pos.x, pos.y, pos.z, 0);
-    rebuildWorldMeshes();
-  } else if (ev.button === 2){ // right -> place
-    const placePos = { x: pos.x + face.x, y: pos.y + face.y, z: pos.z + face.z };
-    // don't place inside player
-    const playerMin = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-    const playerMax = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-    if (!(placePos.x >= Math.floor(playerMin.x) && placePos.x <= Math.floor(playerMax.x) &&
-      placePos.y >= Math.floor(playerMin.y) && placePos.y <= Math.floor(playerMax.y) &&
-      placePos.z >= Math.floor(playerMin.z) && placePos.z <= Math.floor(playerMax.z))) {
-      setBlock(placePos.x, placePos.y, placePos.z, blockSelected);
-      rebuildWorldMeshes();
+  // pointer actions: LMB break, RMB place
+  window.addEventListener('pointerdown', (ev) => {
+    if (document.pointerLockElement !== canvas) return;
+    // build ray in world space from camera
+    const origin = camera.position.clone();
+    const forward = new BABYLON.Vector3(0,0,1);
+    forward.rotateByQuaternionToRef(camera.rotationQuaternion, forward);
+    forward.normalize();
+    const hit = raycastVoxel(origin, forward, 8);
+    if (!hit) return;
+    if (ev.button === 0){
+      // break
+      setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0);
+    } else if (ev.button === 2){
+      // place
+      const p = hit.pos;
+      const f = hit.face;
+      const placeX = p.x + f.x, placeY = p.y + f.y, placeZ = p.z + f.z;
+      // don't place inside player
+      const min = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
+      const max = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
+      if (!(placeX >= Math.floor(min.x) && placeX <= Math.floor(max.x) &&
+            placeY >= Math.floor(min.y) && placeY <= Math.floor(max.y) &&
+            placeZ >= Math.floor(min.z) && placeZ <= Math.floor(max.z))){
+        setBlock(placeX, placeY, placeZ, selected);
+      }
     }
+  });
+  window.addEventListener('contextmenu', (e)=> e.preventDefault());
+
+  // --- UI palette ---
+  const paletteEl = document.getElementById('palette');
+  const selName = document.getElementById('selName');
+  let selected = 1;
+  function updatePalette(){
+    selName.textContent = BLOCKS[selected].name;
+    document.querySelectorAll('.slot').forEach(s => s.classList.toggle('sel', Number(s.dataset.id) === selected));
   }
-});
-
-// contextmenu prevention (right click)
-renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
-
-// raycast that returns the block position and face normal
-function raycastBlock(){
-  const origin = raycaster.ray.origin;
-  const dir = raycaster.ray.direction.clone();
-  const maxDistance = 8;
-  const step = 0.2;
-  let t = 0;
-  while (t < maxDistance){
-    const p = origin.clone().addScaledVector(dir, t);
-    const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z);
-    const id = getBlock(bx,by,bz);
-    if (id !== 0){
-      // compute face by comparing p to block center
-      const local = p.clone().sub(new THREE.Vector3(bx+0.5, by+0.5, bz+0.5));
-      const ax = Math.abs(local.x), ay = Math.abs(local.y), az = Math.abs(local.z);
-      let face = { x:0,y:0,z:0 };
-      if (ax > ay && ax > az) face.x = local.x > 0 ? 1 : -1;
-      else if (ay > ax && ay > az) face.y = local.y > 0 ? 1 : -1;
-      else face.z = local.z > 0 ? 1 : -1;
-      return { pos:{x:bx,y:by,z:bz}, face };
-    }
-    t += step;
-  }
-  return null;
-}
-
-// --- UI palette ---
-const blockPaletteElement = document.getElementById('blockPalette');
-function buildPalette(){
-  blockPaletteElement.innerHTML = '';
   for (let b of BLOCKS){
     if (b.id === 0) continue;
     const el = document.createElement('div');
     el.className = 'slot';
+    el.dataset.id = b.id;
     el.style.background = '#' + b.color.toString(16).padStart(6,'0');
     el.title = b.name;
-    el.dataset.id = b.id;
-    if (b.id === blockSelected) el.classList.add('sel');
-    el.addEventListener('click', () => { blockSelected = b.id; updatePaletteSelection(); });
-    blockPaletteElement.appendChild(el);
+    el.addEventListener('click', ()=> { selected = b.id; updatePalette(); });
+    paletteEl.appendChild(el);
   }
-}
-function updatePaletteSelection(){
-  document.querySelectorAll('#blockPalette .slot').forEach(s => s.classList.toggle('sel', Number(s.dataset.id) === blockSelected));
-}
+  updatePalette();
 
-// --- touch controls (simple) ---
-function setupTouch(){
-  const tF = document.getElementById('tForward');
-  const tB = document.getElementById('tBack');
-  const tL = document.getElementById('tLeft');
-  const tR = document.getElementById('tRight');
-  const tJ = document.getElementById('tJump');
-  const tBr = document.getElementById('tBreak');
-  const tPl = document.getElementById('tPlace');
+  // --- world instance management note: instances map tracks instanced meshes per block coordinate ---
+  // Already handled in setBlock()
 
-  tF.addEventListener('pointerdown', ()=> input.forward = true);
-  tF.addEventListener('pointerup', ()=> input.forward = false);
-  tB.addEventListener('pointerdown', ()=> input.back = true);
-  tB.addEventListener('pointerup', ()=> input.back = false);
-  tL.addEventListener('pointerdown', ()=> input.left = true);
-  tL.addEventListener('pointerup', ()=> input.left = false);
-  tR.addEventListener('pointerdown', ()=> input.right = true);
-  tR.addEventListener('pointerup', ()=> input.right = false);
-  tJ.addEventListener('click', ()=> { if (player.onGround) player.vel.y = 10; });
-  tBr.addEventListener('click', ()=> {
-    // raycast from center of screen
-    const cx = renderer.domElement.clientWidth/2, cy = renderer.domElement.clientHeight/2;
-    pointer.x = (cx / renderer.domElement.clientWidth) * 2 -1;
-    pointer.y = -(cy / renderer.domElement.clientHeight) * 2 +1;
-    raycaster.setFromCamera(pointer, camera);
-    const hit = raycastBlock();
-    if (hit){ setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0); rebuildWorldMeshes(); }
-  });
-  tPl.addEventListener('click', ()=> {
-    const cx = renderer.domElement.clientWidth/2, cy = renderer.domElement.clientHeight/2;
-    pointer.x = (cx / renderer.domElement.clientWidth) * 2 -1;
-    pointer.y = -(cy / renderer.domElement.clientHeight) * 2 +1;
-    raycaster.setFromCamera(pointer, camera);
-    const hit = raycastBlock();
-    if (hit){
-      const p = hit.pos, f = hit.face;
-      setBlock(p.x+f.x, p.y+f.y, p.z+f.z, blockSelected);
-      rebuildWorldMeshes();
-    }
-  });
-}
+  // --- main loop (physics + rendering) ---
+  const gravity = -30;
+  let last = performance.now();
+  engine.runRenderLoop(() => {
+    const now = performance.now();
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
 
-// --- init / render loop ---
-buildMeshes();
-generateTerrain();
-rebuildWorldMeshes();
-buildPalette();
-updatePaletteSelection();
-setupTouch();
-
-camera.position.set(0, 12, 8);
-function animate(ts){
-  const dt = Math.min(0.05, (ts - (animate.last || ts))/1000);
-  animate.last = ts;
-
-  // physics step
-  physicsStep(dt, input);
-
-  // update camera to follow player
-  camera.position.set(player.pos.x, player.pos.y + 0.5, player.pos.z);
-  // keep camera rotation from pointer lock controls
-  // remove pitch limit issues by using Controls
-  // render
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
-}
-requestAnimationFrame(animate);
-
-// handle resize
-window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-});
-
-// reset / regenerate
-function regenerate(){
-  generateTerrain();
-  rebuildWorldMeshes();
-}
-document.getElementById('resetBtn').addEventListener('click', regenerate);
-
-// wire break/place buttons
-document.getElementById('breakBtn').addEventListener('click', () => {
-  pointer.x = 0; pointer.y = 0; raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock(); if (hit){ setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0); rebuildWorldMeshes(); }
-});
-document.getElementById('placeBtn').addEventListener('click', () => {
-  pointer.x = 0; pointer.y = 0; raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock();
-  if (hit){
-    const p = hit.pos, f = hit.face;
-    setBlock(p.x+f.x, p.y+f.y, p.z+f.z, blockSelected);
-    rebuildWorldMeshes();
-  }
-});
-
-// prevent context menu to allow RMB usage
-window.addEventListener('contextmenu', e => e.preventDefault());
-
-// initial touch setup
-setupTouch();
-
-// small note: simple implementation uses per-block Mesh instances per type group.
-// For larger worlds you would use InstancedMesh/merged buffers for performance.
-</script>
-</body>
-</html>
-```// filepath: vscode-vfs://github/Paaxy/Best-Of-All---NETWORK/minecraft-clone.html
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Mini Minecraft Clone — Single File</title>
-
-<!-- Three.js from CDN -->
-<script src="https://unpkg.com/three@0.154.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.154.0/examples/js/controls/PointerLockControls.js"></script>
-
-<style>
-  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:#87ceeb}
-  #ui{position:fixed;left:12px;top:12px;z-index:999;color:#042;backdrop-filter:blur(4px)}
-  #ui .row{margin-bottom:6px}
-  #toolbar{position:fixed;right:12px;top:12px;display:flex;flex-direction:column;gap:6px;z-index:999}
-  .btn{background:#fff;padding:6px 8px;border-radius:6px;border:1px solid #ccc;cursor:pointer}
-  #hud{position:fixed;left:50%;transform:translateX(-50%);top:10px;background:rgba(255,255,255,0.85);padding:6px 10px;border-radius:8px;z-index:999}
-  #touch{position:fixed;left:12px;bottom:12px;z-index:999;display:none}
-  #touch .dir{display:flex;gap:6px}
-  #touch button{width:56px;height:56px;border-radius:8px;border:none;background:rgba(255,255,255,0.9)}
-  canvas{display:block}
-  #blockPalette{display:flex;gap:6px}
-  .slot{width:40px;height:40px;border-radius:6px;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-weight:700;color:#222}
-  .slot.sel{outline:3px solid #222}
-  .legend{font-size:12px;color:#043}
-  @media (max-width:800px){ #touch{display:block} #toolbar{right:6px;top:6px} }
-</style>
-</head>
-<body>
-  <div id="hud">Click to play — WASD to move, mouse to look, LMB break, RMB place, 1-9 select block</div>
-
-  <div id="ui">
-    <div class="row legend">Blocks:</div>
-    <div id="blockPalette"></div>
-  </div>
-
-  <div id="toolbar">
-    <button id="resetBtn" class="btn">Reset World</button>
-    <div style="display:flex;gap:6px">
-      <button id="breakBtn" class="btn">Break</button>
-      <button id="placeBtn" class="btn">Place</button>
-    </div>
-  </div>
-
-  <div id="touch">
-    <div class="dir">
-      <button id="tForward">▲</button>
-      <button id="tLeft">◀</button>
-      <button id="tBack">▼</button>
-      <button id="tRight">▶</button>
-    </div>
-    <div style="margin-top:6px;display:flex;gap:6px">
-      <button id="tJump">Jump</button>
-      <button id="tBreak">Break</button>
-      <button id="tPlace">Place</button>
-    </div>
-  </div>
-
-<script>
-/*
-  Minimal voxel world (single-file) using Three.js.
-  - Colored blocks, no textures
-  - Basic gravity + AABB collisions
-  - Break (LMB) and Place (RMB) via raycast
-  - WASD + PointerLock controls + touch controls
-  - Small procedurally generated terrain with trees and ores
-*/
-
-// --- Config / block types ---
-const BLOCKS = [
-  { id: 0, name: 'Air', color: null },
-  { id: 1, name: 'Grass', color: 0x3db24a },
-  { id: 2, name: 'Dirt', color: 0x8b5a2b },
-  { id: 3, name: 'Stone', color: 0x999999 },
-  { id: 4, name: 'Coal', color: 0x0b0b0b },
-  { id: 5, name: 'Iron', color: 0xd6cfc7 },
-  { id: 6, name: 'Redstone', color: 0xc92a2a },
-  { id: 7, name: 'Gold', color: 0xf2d13d },
-  { id: 8, name: 'Water', color: 0x3f8efc },
-  { id: 9, name: 'Log', color: 0x4b2e19 },
-  { id: 10, name: 'Leaves', color: 0x1f5f2f }
-];
-
-// world dimensions (radius)
-const SIZE = 24; // half-size for x,z
-const HEIGHT = 20; // vertical blocks
-const SCALE = 1; // block size in world units
-
-// --- Three.js setup ---
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x87ceeb, 0.0025);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio ? window.devicePixelRatio : 1);
-document.body.appendChild(renderer.domElement);
-
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 6, 0);
-
-// lights
-const hemi = new THREE.HemisphereLight(0xffffee, 0x444422, 0.9);
-scene.add(hemi);
-const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-dir.position.set(5, 10, 7);
-scene.add(dir);
-
-// ground helper plane under world for shadows/visual
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshPhongMaterial({ color:0x6db76b }));
-ground.rotation.x = -Math.PI/2;
-ground.position.y = -0.5;
-scene.add(ground);
-
-// --- World data store (sparse map) ---
-const world = new Map(); // key -> block id
-
-function key(x,y,z){ return `${x},${y},${z}`; }
-function getBlock(x,y,z){ return world.get(key(x,y,z)) || 0; }
-function setBlock(x,y,z,id){
-  if (id === 0) world.delete(key(x,y,z));
-  else world.set(key(x,y,z), id);
-}
-
-// --- Mesh pool per block type (merged geometry) ---
-const blockMeshes = new Map(); // id -> THREE.Mesh (Instanced or merged)
-const singleGeometry = new THREE.BoxGeometry(SCALE, SCALE, SCALE);
-singleGeometry.translate(0.5*SCALE, 0.5*SCALE, 0.5*SCALE); // align to integer grid
-
-function buildMeshes(){
-  // clear existing meshes
-  blockMeshes.forEach(m => scene.remove(m));
-  blockMeshes.clear();
-
-  // for each block type (except air), build an InstancedMesh with max count estimate
-  for (let b of BLOCKS){
-    if (b.id === 0) continue;
-    const mat = new THREE.MeshLambertMaterial({ color: b.color });
-    // use dynamic merging approach: create a group to hold many single meshes
-    const group = new THREE.Group();
-    group.userData = { id: b.id, mat };
-    scene.add(group);
-    blockMeshes.set(b.id, group);
-  }
-}
-
-// place a block mesh at position (adds a Mesh to group's children)
-function addBlockMesh(x,y,z,id){
-  // skip air
-  if (id === 0) return;
-  const group = blockMeshes.get(id);
-  if (!group) return;
-  const m = new THREE.Mesh(singleGeometry, group.userData.mat);
-  m.position.set(x*SCALE, y*SCALE, z*SCALE);
-  m.updateMatrix();
-  m.matrixAutoUpdate = false;
-  group.add(m);
-}
-
-// rebuild visible geometry from world map (simple, not optimized)
-function rebuildWorldMeshes(){
-  // clear groups
-  blockMeshes.forEach(group => { while(group.children.length) group.remove(group.children[0]); });
-  // iterate world map
-  for (let [k, id] of world.entries()){
-    const [x,y,z] = k.split(',').map(Number);
-    // cull far blocks
-    if (Math.abs(x) > SIZE*1.2 || Math.abs(z) > SIZE*1.2 || y < -10 || y > HEIGHT+6) continue;
-    addBlockMesh(x, y, z, id);
-  }
-}
-
-// --- simple procedural terrain ---
-function generateTerrain(){
-  world.clear();
-  const seed = Math.random()*10000;
-  function noise(x,z){
-    // simple pseudo-noise using sin / frag to make gentle hills
-    return Math.floor((Math.sin((x+seed)*0.12) + Math.cos((z-seed)*0.11))*2.2 + 6 + (Math.sin((x+z+seed)*0.07)*2));
-  }
-  for (let x = -SIZE; x <= SIZE; x++){
-    for (let z = -SIZE; z <= SIZE; z++){
-      const h = Math.max(1, noise(x,z));
-      for (let y = 0; y <= h; y++){
-        // top block grass, below dirt, occasional stone/ores
-        let id = 2; // dirt
-        if (y === h) id = 1; // grass
-        else if (y <= h - 4) {
-          id = 3; // stone
-          // ores occasionally
-          const r = Math.random();
-          if (r < 0.01) id = 4; // coal
-          else if (r < 0.015) id = 5; // iron
-          else if (r < 0.017) id = 6; // redstone
-          else if (r < 0.018) id = 7; // gold
-        }
-        setBlock(x,y,z,id);
-      }
-      // water low areas
-      if (noise(x,z) < 5){
-        for (let y = noise(x,z)+1; y <= 3; y++) setBlock(x,y,z,8); // water up to level 3
-      }
-      // random trees
-      if (Math.random() < 0.05 && noise(x,z) > 4){
-        const trunkHeight = 3 + Math.floor(Math.random()*2);
-        for (let t=1; t<=trunkHeight; t++) setBlock(x, noise(x,z)+t, z, 9); // log
-        const top = noise(x,z)+trunkHeight;
-        for (let ox=-2; ox<=2; ox++) for (let oz=-2; oz<=2; oz++){
-          if (Math.abs(ox) + Math.abs(oz) < 4) setBlock(x+ox, top, z+oz, 10); // leaves
-        }
+    // movement vector from yaw/pitch
+    const forward = new BABYLON.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const right = new BABYLON.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    let move = new BABYLON.Vector3(0,0,0);
+    if (input.forward) move.addInPlace(forward);
+    if (input.back) move.subtractInPlace(forward);
+    if (input.left) move.subtractInPlace(right);
+    if (input.right) move.addInPlace(right);
+    if (move.lengthSquared() > 0){
+      move.normalize();
+      move.scaleInPlace(player.speed * dt);
+      player.pos.x += move.x;
+      player.pos.z += move.z;
+      // collision test horizontal
+      const minH = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
+      const maxH = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
+      if (boxCollides(minH, maxH)){
+        // revert
+        player.pos.x -= move.x; player.pos.z -= move.z;
       }
     }
-  }
-}
 
-// --- player / physics ---
-const player = {
-  pos: new THREE.Vector3(0, 10, 5),
-  vel: new THREE.Vector3(),
-  speed: 6,
-  height: 1.8,
-  width: 0.6,
-  onGround: false
-};
+    // gravity
+    player.vel.y += gravity * dt;
+    player.pos.y += player.vel.y * dt;
 
-const raycaster = new THREE.Raycaster();
-const pointer = new THREE.Vector2();
-let blockSelected = 1; // default to grass
-
-// collision test: returns true if box (min,max) intersects any block
-function boxCollides(min, max){
-  const x0 = Math.floor(min.x), x1 = Math.floor(max.x);
-  const y0 = Math.floor(min.y), y1 = Math.floor(max.y);
-  const z0 = Math.floor(min.z), z1 = Math.floor(max.z);
-  for (let x = x0; x <= x1; x++){
-    for (let y = y0; y <= y1; y++){
-      for (let z = z0; z <= z1; z++){
-        if (getBlock(x,y,z) !== 0) return true;
-      }
+    // vertical collision
+    const minV = new BABYLON.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
+    const maxV = new BABYLON.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
+    if (boxCollides(minV, maxV)){
+      // snap to integer above block
+      player.pos.y = Math.ceil(player.pos.y);
+      player.vel.y = 0;
+      player.onGround = true;
+    } else {
+      player.onGround = false;
     }
-  }
-  return false;
-}
 
-// resolve collisions and update position
-function physicsStep(dt, input){
-  // apply horizontal movement input
-  const forward = input.forward?1:0, back = input.back?1:0, left = input.left?1:0, right = input.right?1:0;
-  const dir = new THREE.Vector3();
-  // yaw from camera rotation (y axis)
-  const yaw = camera.rotation.y;
-  const sin = Math.sin(yaw), cos = Math.cos(yaw);
-  const moveX = (-forward + back) * -sin + (left - right) * -cos;
-  const moveZ = (forward - back) * -cos + (left - right) * sin;
-  dir.set(moveX, 0, moveZ);
-  if (dir.lengthSq() > 0) {
-    dir.normalize();
-    dir.multiplyScalar(player.speed * dt);
-    player.pos.x += dir.x;
-    player.pos.z += dir.z;
-    // collision on XZ
-    const min = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-    const max = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-    if (boxCollides(min, max)){
-      // undo movement
-      player.pos.x -= dir.x;
-      player.pos.z -= dir.z;
-    }
-  }
+    // place camera
+    camera.position.set(player.pos.x, player.pos.y + 0.4, player.pos.z);
 
-  // gravity
-  player.vel.y -= 30 * dt;
-  player.pos.y += player.vel.y * dt;
-
-  // collision with terrain vertically
-  const min = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-  const max = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-  if (boxCollides(min, max)){
-    // push up until no collision (simple resolution)
-    // step up in small increments
-    player.pos.y = Math.ceil(player.pos.y);
-    player.vel.y = 0;
-    player.onGround = true;
-  } else {
-    player.onGround = false;
-  }
-}
-
-// --- input & controls ---
-const input = { forward:false, back:false, left:false, right:false, jump:false };
-
-const controls = new THREE.PointerLockControls(camera, document.body);
-document.body.addEventListener('click', () => {
-  controls.lock();
-}, { once: true });
-
-controls.addEventListener('lock', () => { document.getElementById('hud').style.display = 'none'; });
-controls.addEventListener('unlock', () => { document.getElementById('hud').style.display = 'block'; });
-
-// keyboard
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'w') input.forward = true;
-  if (e.key === 's') input.back = true;
-  if (e.key === 'a') input.left = true;
-  if (e.key === 'd') input.right = true;
-  if (e.code === 'Space') { if (player.onGround) player.vel.y = 10; }
-  // block selection 1..9
-  if (/^[1-9]$/.test(e.key)) {
-    const idx = Number(e.key);
-    if (idx < BLOCKS.length) blockSelected = idx;
-    updatePaletteSelection();
-  }
-  if (e.key === 'r') regenerate();
-});
-
-window.addEventListener('keyup', (e) => {
-  if (e.key === 'w') input.forward = false;
-  if (e.key === 's') input.back = false;
-  if (e.key === 'a') input.left = false;
-  if (e.key === 'd') input.right = false;
-});
-
-// pointer actions: left click break, right click place
-renderer.domElement.addEventListener('pointerdown', (ev) => {
-  if (!controls.isLocked) return;
-  pointer.x = (ev.clientX / renderer.domElement.clientWidth) * 2 - 1;
-  pointer.y = -(ev.clientY / renderer.domElement.clientHeight) * 2 + 1;
-  raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock();
-  if (!hit) return;
-  const { pos, face } = hit;
-  if (ev.button === 0){ // left -> break
-    setBlock(pos.x, pos.y, pos.z, 0);
-    rebuildWorldMeshes();
-  } else if (ev.button === 2){ // right -> place
-    const placePos = { x: pos.x + face.x, y: pos.y + face.y, z: pos.z + face.z };
-    // don't place inside player
-    const playerMin = new THREE.Vector3(player.pos.x - player.width/2, player.pos.y, player.pos.z - player.width/2);
-    const playerMax = new THREE.Vector3(player.pos.x + player.width/2, player.pos.y + player.height, player.pos.z + player.width/2);
-    if (!(placePos.x >= Math.floor(playerMin.x) && placePos.x <= Math.floor(playerMax.x) &&
-      placePos.y >= Math.floor(playerMin.y) && placePos.y <= Math.floor(playerMax.y) &&
-      placePos.z >= Math.floor(playerMin.z) && placePos.z <= Math.floor(playerMax.z))) {
-      setBlock(placePos.x, placePos.y, placePos.z, blockSelected);
-      rebuildWorldMeshes();
-    }
-  }
-});
-
-// contextmenu prevention (right click)
-renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
-
-// raycast that returns the block position and face normal
-function raycastBlock(){
-  const origin = raycaster.ray.origin;
-  const dir = raycaster.ray.direction.clone();
-  const maxDistance = 8;
-  const step = 0.2;
-  let t = 0;
-  while (t < maxDistance){
-    const p = origin.clone().addScaledVector(dir, t);
-    const bx = Math.floor(p.x), by = Math.floor(p.y), bz = Math.floor(p.z);
-    const id = getBlock(bx,by,bz);
-    if (id !== 0){
-      // compute face by comparing p to block center
-      const local = p.clone().sub(new THREE.Vector3(bx+0.5, by+0.5, bz+0.5));
-      const ax = Math.abs(local.x), ay = Math.abs(local.y), az = Math.abs(local.z);
-      let face = { x:0,y:0,z:0 };
-      if (ax > ay && ax > az) face.x = local.x > 0 ? 1 : -1;
-      else if (ay > ax && ay > az) face.y = local.y > 0 ? 1 : -1;
-      else face.z = local.z > 0 ? 1 : -1;
-      return { pos:{x:bx,y:by,z:bz}, face };
-    }
-    t += step;
-  }
-  return null;
-}
-
-// --- UI palette ---
-const palette = document.getElementById('blockPalette');
-function buildPalette(){
-  palette.innerHTML = '';
-  for (let b of BLOCKS){
-    if (b.id === 0) continue;
-    const el = document.createElement('div');
-    el.className = 'slot';
-    el.style.background = '#' + b.color.toString(16).padStart(6,'0');
-    el.title = b.name;
-    el.dataset.id = b.id;
-    if (b.id === blockSelected) el.classList.add('sel');
-    el.addEventListener('click', () => { blockSelected = b.id; updatePaletteSelection(); });
-    palette.appendChild(el);
-  }
-}
-function updatePaletteSelection(){
-  document.querySelectorAll('#blockPalette .slot').forEach(s => s.classList.toggle('sel', Number(s.dataset.id) === blockSelected));
-}
-
-// --- touch controls (simple) ---
-function setupTouch(){
-  const tF = document.getElementById('tForward');
-  const tB = document.getElementById('tBack');
-  const tL = document.getElementById('tLeft');
-  const tR = document.getElementById('tRight');
-  const tJ = document.getElementById('tJump');
-  const tBr = document.getElementById('tBreak');
-  const tPl = document.getElementById('tPlace');
-
-  tF.addEventListener('pointerdown', ()=> input.forward = true);
-  tF.addEventListener('pointerup', ()=> input.forward = false);
-  tB.addEventListener('pointerdown', ()=> input.back = true);
-  tB.addEventListener('pointerup', ()=> input.back = false);
-  tL.addEventListener('pointerdown', ()=> input.left = true);
-  tL.addEventListener('pointerup', ()=> input.left = false);
-  tR.addEventListener('pointerdown', ()=> input.right = true);
-  tR.addEventListener('pointerup', ()=> input.right = false);
-  tJ.addEventListener('click', ()=> { if (player.onGround) player.vel.y = 10; });
-  tBr.addEventListener('click', ()=> {
-    // raycast from center of screen
-    const cx = renderer.domElement.clientWidth/2, cy = renderer.domElement.clientHeight/2;
-    pointer.x = (cx / renderer.domElement.clientWidth) * 2 -1;
-    pointer.y = -(cy / renderer.domElement.clientHeight) * 2 +1;
-    raycaster.setFromCamera(pointer, camera);
-    const hit = raycastBlock();
-    if (hit){ setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0); rebuildWorldMeshes(); }
+    scene.render();
   });
-  tPl.addEventListener('click', ()=> {
-    const cx = renderer.domElement.clientWidth/2, cy = renderer.domElement.clientHeight/2;
-    pointer.x = (cx / renderer.domElement.clientWidth) * 2 -1;
-    pointer.y = -(cy / renderer.domElement.clientHeight) * 2 +1;
-    raycaster.setFromCamera(pointer, camera);
-    const hit = raycastBlock();
-    if (hit){
-      const p = hit.pos, f = hit.face;
-      setBlock(p.x+f.x, p.y+f.y, p.z+f.z, blockSelected);
-      rebuildWorldMeshes();
-    }
-  });
-}
 
-// --- init / render loop ---
-buildMeshes();
-generateTerrain();
-rebuildWorldMeshes();
-buildPalette();
-updatePaletteSelection();
-setupTouch();
+  // window resizing
+  window.addEventListener('resize', ()=> engine.resize() );
 
-camera.position.set(0, 12, 8);
-function animate(ts){
-  const dt = Math.min(0.05, (ts - (animate.last || ts))/1000);
-  animate.last = ts;
+  // regenerate button (R)
+  // small help UI hooking already created via keyboard 'r'
 
-  // physics step
-  physicsStep(dt, input);
-
-  // update camera to follow player
-  camera.position.set(player.pos.x, player.pos.y + 0.5, player.pos.z);
-  // keep camera rotation from pointer lock controls
-  // remove pitch limit issues by using Controls
-  // render
-  renderer.render(scene, camera);
-  requestAnimationFrame(animate);
-}
-requestAnimationFrame(animate);
-
-// handle resize
-window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-});
-
-// reset / regenerate
-function regenerate(){
-  generateTerrain();
-  rebuildWorldMeshes();
-}
-document.getElementById('resetBtn').addEventListener('click', regenerate);
-
-// wire break/place buttons
-document.getElementById('breakBtn').addEventListener('click', () => {
-  pointer.x = 0; pointer.y = 0; raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock(); if (hit){ setBlock(hit.pos.x, hit.pos.y, hit.pos.z, 0); rebuildWorldMeshes(); }
-});
-document.getElementById('placeBtn').addEventListener('click', () => {
-  pointer.x = 0; pointer.y = 0; raycaster.setFromCamera(pointer, camera);
-  const hit = raycastBlock();
-  if (hit){
-    const p = hit.pos, f = hit.face;
-    setBlock(p.x+f.x, p.y+f.y, p.z+f.z, blockSelected);
-    rebuildWorldMeshes();
-  }
-});
-
-// prevent context menu to allow RMB usage
-window.addEventListener('contextmenu', e => e.preventDefault());
-
-// initial touch setup
-setupTouch();
-
-// small note: simple implementation uses per-block Mesh instances per type group.
-// For larger worlds you would use InstancedMesh/merged buffers for performance.
+  // done
+})();
 </script>
 </body>
 </html>
