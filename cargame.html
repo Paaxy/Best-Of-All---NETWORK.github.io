@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Car Game — Best Of All (single file)</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#f4f4f9;color:#222;display:flex;align-items:center;justify-content:center;min-height:100vh}
+    .game-wrap{width:100%;max-width:420px;padding:12px}
+    .hud{display:flex;justify-content:space-between;margin-bottom:8px}
+    .info{background:#fff;padding:6px 10px;border-radius:6px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+    .canvas-area{position:relative;background:#ddd;border-radius:10px;overflow:hidden;box-shadow:0 6px 18px rgba(0,0,0,.08)}
+    canvas{display:block;width:100%;height:auto;background:linear-gradient(#6b6,#3a3)}
+    .controls{display:flex;justify-content:space-between;margin-top:10px}
+    .controls button{flex:1;margin:0 6px;padding:12px 0;font-size:20px;border-radius:8px;background:#1e88e5;color:#fff;border:none;box-shadow:0 3px 8px rgba(0,0,0,.12)}
+    .controls button:active{transform:translateY(1px)}
+    .small{text-align:center;margin-top:8px;color:#666;font-size:13px}
+    .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.45)}
+    .overlay.hidden{display:none}
+    .panel{background:#fff;padding:18px;border-radius:10px;text-align:center;min-width:200px}
+    .panel h2{margin:0 0 8px}
+    .panel button{margin-top:8px;padding:8px 14px;border-radius:6px;border:none;background:#1976d2;color:#fff}
+  </style>
+</head>
+<body>
+  <main class="game-wrap">
+    <header class="hud">
+      <div class="info"><span id="lives">Lives: 3</span></div>
+      <div class="info"><span id="score">Score: 0</span></div>
+    </header>
+
+    <div class="canvas-area">
+      <canvas id="game" width="360" height="640" aria-label="Car game canvas"></canvas>
+
+      <div id="overlay" class="overlay hidden">
+        <div class="panel">
+          <h2 id="overlay-title">Game Over</h2>
+          <p id="overlay-msg">Score: 0</p>
+          <button id="restart">Restart</button>
+        </div>
+      </div>
+    </div>
+
+    <nav class="controls">
+      <button id="left" aria-label="Move left">◀</button>
+      <button id="right" aria-label="Move right">▶</button>
+    </nav>
+
+    <footer class="small">Controls: ← → or A/D (desktop). Use on-screen buttons or touch/drag on canvas (mobile).</footer>
+  </main>
+
+  <script>
+  // Single-file cargame.js (kept compact)
+  (function(){
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const W = 360, H = 640;
+    canvas.width = W; canvas.height = H;
+
+    const livesEl = document.getElementById('lives');
+    const scoreEl = document.getElementById('score');
+    const overlay = document.getElementById('overlay');
+    const overlayTitle = document.getElementById('overlay-title');
+    const overlayMsg = document.getElementById('overlay-msg');
+    const restartBtn = document.getElementById('restart');
+    const leftBtn = document.getElementById('left');
+    const rightBtn = document.getElementById('right');
+
+    const player = { w:40, h:70, x:(W/2)-20, y:H-100, speed:220, vx:0, color:'#1976d2' };
+    const obstacles = [];
+    let spawnInterval=900, spawnTimer=0, lastTime=0, lives=3, score=0, running=false, moveDir=0, touchDrag=false;
+
+    function reset(){
+      obstacles.length=0; lives=3; score=0; spawnInterval=900; player.x=(W/2)-player.w/2;
+      running=true; overlay.classList.add('hidden'); updateUI(); lastTime=performance.now(); requestAnimationFrame(loop);
+    }
+    function updateUI(){ livesEl.textContent = 'Lives: '+lives; scoreEl.textContent = 'Score: '+score; }
+    function spawnObstacle(){
+      const size = 20 + Math.round(Math.random()*36);
+      const x = Math.max(8, Math.min(W-size-8, Math.random()*(W-size)));
+      const speed = 80 + Math.random()*160 + (score*0.6);
+      obstacles.push({x,y:-size,w:size,h:size,speed,color:'#d32f2f'});
+    }
+    function rectsIntersect(a,b){ return !(a.x+a.w < b.x || a.x > b.x+b.w || a.y+a.h < b.y || a.y > b.y+b.h); }
+    function gameOver(){ running=false; overlay.classList.remove('hidden'); overlayTitle.textContent='Game Over'; overlayMsg.textContent='Score: '+score; }
+
+    function loop(ts){
+      if(!running) return;
+      const dt = Math.min(40, ts-lastTime)/1000; lastTime = ts;
+      spawnTimer += dt*1000;
+      if(spawnTimer >= spawnInterval){ spawnTimer = 0; spawnObstacle(); spawnInterval = Math.max(350, spawnInterval * 0.985); }
+
+      let targetVx = moveDir * player.speed;
+      player.vx += (targetVx - player.vx) * Math.min(1, dt*12);
+      player.x += player.vx * dt;
+      player.x = Math.max(6, Math.min(W - player.w - 6, player.x));
+
+      for(let i=obstacles.length-1;i>=0;i--){
+        const o = obstacles[i]; o.y += o.speed * dt;
+        if(o.y > H + 50){ obstacles.splice(i,1); score += 10; updateUI(); }
+        else if(rectsIntersect(o, player)){ obstacles.splice(i,1); lives -= 1; updateUI(); if(lives <= 0){ gameOver(); return; } }
+      }
+
+      ctx.clearRect(0,0,W,H);
+      ctx.fillStyle = '#7bc96f'; ctx.fillRect(0,0,W,H);
+      obstacles.forEach(o=>{ ctx.fillStyle = o.color; ctx.fillRect(Math.round(o.x), Math.round(o.y), o.w, o.h); });
+      ctx.fillStyle = player.color; ctx.fillRect(Math.round(player.x), Math.round(player.y), player.w, player.h);
+
+      requestAnimationFrame(loop);
+    }
+
+    // Input
+    window.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') moveDir = -1;
+      if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') moveDir = 1;
+    });
+    window.addEventListener('keyup', e => {
+      if (['ArrowLeft','a','A'].includes(e.key) && moveDir === -1) moveDir = 0;
+      if (['ArrowRight','d','D'].includes(e.key) && moveDir === 1) moveDir = 0;
+    });
+
+    leftBtn.addEventListener('pointerdown', ()=> moveDir = -1);
+    rightBtn.addEventListener('pointerdown', ()=> moveDir = 1);
+    const stopPointer = ()=>{ if(!touchDrag) moveDir = 0; };
+    leftBtn.addEventListener('pointerup', stopPointer); rightBtn.addEventListener('pointerup', stopPointer);
+    leftBtn.addEventListener('pointercancel', stopPointer); rightBtn.addEventListener('pointercancel', stopPointer);
+
+    canvas.addEventListener('pointerdown', e => {
+      touchDrag = true; canvas.setPointerCapture(e.pointerId);
+      const rect = canvas.getBoundingClientRect(); const px = ((e.clientX - rect.left)/rect.width)*W;
+      player.x = px - player.w/2;
+    });
+    canvas.addEventListener('pointermove', e => {
+      if(!touchDrag) return;
+      const rect = canvas.getBoundingClientRect(); const px = ((e.clientX - rect.left)/rect.width)*W;
+      player.x = px - player.w/2;
+    });
+    canvas.addEventListener('pointerup', e => { touchDrag = false; try{ canvas.releasePointerCapture(e.pointerId); }catch(_){} });
+    canvas.addEventListener('pointercancel', ()=> { touchDrag = false; });
+
+    restartBtn.addEventListener('click', reset);
+
+    document.addEventListener('DOMContentLoaded', ()=> {
+      player.x = (W/2) - player.w/2; player.y = H - player.h - 30; updateUI(); reset();
+    });
+  })();
+  </script>
+</body>
+</html>
