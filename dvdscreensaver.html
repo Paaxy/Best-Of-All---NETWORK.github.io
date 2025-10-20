@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DVD Screensaver</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: black;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<canvas id="dvdCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('dvdCanvas');
+const ctx = canvas.getContext('2d');
+
+let width = canvas.width = window.innerWidth;
+let height = canvas.height = window.innerHeight;
+
+window.addEventListener('resize', () => {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+});
+
+// 💧 Replace this with your own image URL!
+const textureURL = "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2e/DVD_logo.svg/320px-DVD_logo.svg.png";
+
+const logo = new Image();
+logo.src = textureURL;
+
+let x = Math.random() * (width - 128);
+let y = Math.random() * (height - 72);
+let dx = 2;
+let dy = 2;
+const logoWidth = 128;
+const logoHeight = 72;
+
+logo.onload = () => {
+  requestAnimationFrame(draw);
+};
+
+function draw() {
+  ctx.clearRect(0, 0, width, height);
+  ctx.drawImage(logo, x, y, logoWidth, logoHeight);
+
+  x += dx;
+  y += dy;
+
+  if (x + logoWidth >= width || x <= 0) {
+    dx = -dx;
+    changeColor();
+  }
+  if (y + logoHeight >= height || y <= 0) {
+    dy = -dy;
+    changeColor();
+  }
+
+  requestAnimationFrame(draw);
+}
+
+function changeColor() {
+  // Optional: tint effect or change image dynamically
+  // You could swap logo.src here to another image if you want!
+}
+</script>
+</body>
+</html>
