@@ -17,6 +17,37 @@
       height: 100%;
       display: block;
     }
+    #inventory {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      background: rgba(255,255,255,0.8);
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+    .block-btn {
+      width: 30px;
+      height: 30px;
+      border: 2px solid #333;
+      cursor: pointer;
+    }
+    .selected {
+      border-color: red;
+    }
+    #selectedLabel {
+      position: absolute;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
     #crosshair {
       position: absolute;
       top: 50%;
@@ -32,6 +63,8 @@
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
+<div id="inventory"></div>
+<div id="selectedLabel">Selected: grass</div>
 <div id="crosshair"></div>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
@@ -48,35 +81,37 @@ const blockColors = {
   grass: "#00aa00",
   dirt: "#8B4513",
   stone: "#808080",
+  coal: "#404040",
+  iron: "#b87333",
+  gold: "#FFD700",
+  redstone: "#FF0000",
+  diamond: "#00CED1",
+  lava: "#FF4500",
+  water: "#1E90FF",
+  leaves: "#006400",
+  logs: "#4b2e2e",
   bedrock: "#000000"
 };
 
-// Simple Perlin-like function
-function perlin(x, z) {
-  return Math.floor((Math.sin(x * 0.2) + Math.cos(z * 0.2)) * 2 + 5);
-}
+let selectedBlock = "grass";
 
-function createBlock(x, y, z, type) {
-  const box = BABYLON.MeshBuilder.CreateBox(`box-${x}-${y}-${z}`, { size: 1 }, scene);
-  box.position.set(x, y, z);
-  const mat = new BABYLON.StandardMaterial(`mat-${x}-${y}-${z}`, scene);
-  mat.diffuseColor = BABYLON.Color3.FromHexString(blockColors[type]);
-  box.material = mat;
-  box.checkCollisions = true;
-  box.physicsImpostor = new BABYLON.PhysicsImpostor(box, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0 }, scene);
-}
+// Inventory UI
+const inventory = document.getElementById("inventory");
+const label = document.getElementById("selectedLabel");
 
-// Generate terrain
-for (let x = 0; x < 32; x++) {
-  for (let z = 0; z < 32; z++) {
-    const h = perlin(x, z);
-    for (let y = 0; y <= h; y++) {
-      const type = y === h ? "grass" : "dirt";
-      createBlock(x, y, z, type);
-    }
-    createBlock(x, -1, z, "bedrock");
-  }
-}
+Object.keys(blockColors).forEach(type => {
+  const btn = document.createElement("div");
+  btn.className = "block-btn";
+  btn.style.background = blockColors[type];
+  btn.onclick = () => {
+    selectedBlock = type;
+    document.querySelectorAll(".block-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+    label.textContent = "Selected: " + selectedBlock;
+  };
+  inventory.appendChild(btn);
+});
+inventory.firstChild.classList.add("selected");
 
 // First-person camera
 const camera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(16, 20, 16), scene);
@@ -96,6 +131,47 @@ canvas.addEventListener("click", () => {
 // Light
 const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
 
+// Simple Perlin-like function
+function perlin(x, z) {
+  return Math.floor((Math.sin(x * 0.2) + Math.cos(z * 0.2)) * 2 + 5);
+}
+
+function createBlock(x, y, z, type, physics = false) {
+  const box = BABYLON.MeshBuilder.CreateBox(`box-${x}-${y}-${z}`, { size: 1 }, scene);
+  box.position.set(x, y, z);
+  const mat = new BABYLON.StandardMaterial(`mat-${x}-${y}-${z}`, scene);
+  mat.diffuseColor = BABYLON.Color3.FromHexString(blockColors[type]);
+  box.material = mat;
+  box.isPickable = true;
+  box.checkCollisions = true;
+  if (physics) {
+    box.physicsImpostor = new BABYLON.PhysicsImpostor(box, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0 }, scene);
+  }
+  return box;
+}
+
+// Generate terrain
+for (let x = 0; x < 32; x++) {
+  for (let z = 0; z < 32; z++) {
+    const h = perlin(x, z);
+    for (let y = 0; y <= h; y++) {
+      let type = "dirt";
+      if (y === h) type = "grass";
+      else if (y < h - 3) {
+        const r = Math.random();
+        if (r < 0.05) type = "diamond";
+        else if (r < 0.1) type = "redstone";
+        else if (r < 0.2) type = "coal";
+        else if (r < 0.3) type = "iron";
+        else if (r < 0.35) type = "gold";
+        else type = "stone";
+      }
+      createBlock(x, y, z, type, true);
+    }
+    createBlock(x, -1, z, "bedrock", true);
+  }
+}
+
 // WASD movement
 const inputMap = {};
 scene.actionManager = new BABYLON.ActionManager(scene);
@@ -114,6 +190,19 @@ scene.onBeforeRenderObservable.add(() => {
   if (inputMap["a"]) camera.position.addInPlace(right.scale(-camera.speed));
   if (inputMap["d"]) camera.position.addInPlace(right.scale(camera.speed));
 });
+
+// Block placement
+scene.onPointerDown = function () {
+  const pick = scene.pick(scene.pointerX, scene.pointerY);
+  if (pick.hit) {
+    const normal = pick.getNormal(true);
+    const pos = pick.pickedPoint.add(normal);
+    const x = Math.floor(pos.x + 0.5);
+    const y = Math.floor(pos.y + 0.5);
+    const z = Math.floor(pos.z + 0.5);
+    createBlock(x, y, z, selectedBlock, true);
+  }
+};
 
 engine.runRenderLoop(() => {
   scene.render();
