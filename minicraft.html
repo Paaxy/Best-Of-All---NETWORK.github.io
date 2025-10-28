@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>MiniCraft Babylon</title>
+  <title>MiniCraft First-Person</title>
   <style>
     html, body {
       margin: 0;
@@ -37,11 +37,35 @@
     .selected {
       border-color: red;
     }
+    #crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 10px;
+      height: 10px;
+      background: black;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    #selectedLabel {
+      position: absolute;
+      bottom: 50px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.6);
+      color: white;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
 <canvas id="renderCanvas"></canvas>
 <div id="inventory"></div>
+<div id="selectedLabel">Selected: grass</div>
+<div id="crosshair"></div>
 
 <script src="https://cdn.babylonjs.com/babylon.js"></script>
 <script src="https://cdn.babylonjs.com/cannon.js"></script>
@@ -50,14 +74,7 @@ const canvas = document.getElementById("renderCanvas");
 const engine = new BABYLON.Engine(canvas, true);
 const scene = new BABYLON.Scene(engine);
 scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
-
 scene.clearColor = new BABYLON.Color3.FromHexString("#87CEFA"); // sky
-
-const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(8, 15, 8), scene);
-camera.attachControl(canvas, true);
-camera.speed = 0.5;
-
-const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
 
 const blockColors = {
   grass: "#00aa00",
@@ -79,6 +96,8 @@ let selectedBlock = "grass";
 
 // Inventory UI
 const inventory = document.getElementById("inventory");
+const label = document.getElementById("selectedLabel");
+
 Object.keys(blockColors).forEach(type => {
   const btn = document.createElement("div");
   btn.className = "block-btn";
@@ -87,10 +106,29 @@ Object.keys(blockColors).forEach(type => {
     selectedBlock = type;
     document.querySelectorAll(".block-btn").forEach(b => b.classList.remove("selected"));
     btn.classList.add("selected");
+    label.textContent = "Selected: " + selectedBlock;
   };
   inventory.appendChild(btn);
 });
 inventory.firstChild.classList.add("selected");
+
+// First-person camera
+const camera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(8, 15, 8), scene);
+camera.attachControl(canvas, true);
+camera.speed = 0.5;
+camera.inertia = 0;
+camera.angularSensibility = 500;
+camera.checkCollisions = true;
+camera.applyGravity = true;
+camera.ellipsoid = new BABYLON.Vector3(0.5, 1, 0.5);
+
+// Pointer lock
+canvas.addEventListener("click", () => {
+  canvas.requestPointerLock();
+});
+
+// Light
+const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), scene);
 
 // Terrain generation
 function perlin(x, z) {
@@ -103,8 +141,9 @@ function createBlock(x, y, z, type, physics = false) {
   const mat = new BABYLON.StandardMaterial(`mat-${x}-${y}-${z}`, scene);
   mat.diffuseColor = BABYLON.Color3.FromHexString(blockColors[type]);
   box.material = mat;
+  box.isPickable = true;
   if (physics) {
-    box.physicsImpostor = new BABYLON.PhysicsImpostor(box, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, restitution: 0 }, scene);
+    box.physicsImpostor = new BABYLON.PhysicsImpostor(box, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0 }, scene);
   }
   return box;
 }
@@ -121,19 +160,14 @@ for (let x = 0; x < 16; x++) {
   }
 }
 
-// Player physics body
-const player = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 1 }, scene);
-player.position.set(8, 20, 8);
-player.physicsImpostor = new BABYLON.PhysicsImpostor(player, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 1, restitution: 0 }, scene);
-camera.lockedTarget = player;
-
 // Block placement
 scene.onPointerDown = function () {
   const pick = scene.pick(scene.pointerX, scene.pointerY);
   if (pick.hit) {
-    const pos = pick.pickedPoint;
+    const normal = pick.getNormal(true);
+    const pos = pick.pickedPoint.add(normal);
     const x = Math.floor(pos.x + 0.5);
-    const y = Math.floor(pos.y + 1.5);
+    const y = Math.floor(pos.y + 0.5);
     const z = Math.floor(pos.z + 0.5);
     createBlock(x, y, z, selectedBlock, true);
   }
