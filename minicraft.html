@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>MiniCraft Babylon</title>
+  <style>
+    html, body {
+      margin: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: lightblue;
+      font-family: sans-serif;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #inventory {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 8px;
+      background: rgba(255,255,255,0.8);
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+    .block-btn {
+      width: 30px;
+      height: 30px;
+      border: 2px solid #333;
+      cursor: pointer;
+    }
+    .selected {
+      border-color: red;
+    }
+  </style>
+</head>
+<body>
+<canvas id="renderCanvas"></canvas>
+<div id="inventory"></div>
+
+<script src="https://cdn.babylonjs.com/babylon.js"></script>
+<script src="https://cdn.babylonjs.com/cannon.js"></script>
+<script>
+const canvas = document.getElementById("renderCanvas");
+const engine = new BABYLON.Engine(canvas, true);
+const scene = new BABYLON.Scene(engine);
+scene.enablePhysics(new BABYLON.Vector3(0, -9.81, 0), new BABYLON.CannonJSPlugin());
+
+scene.clearColor = new BABYLON.Color3.FromHexString("#87CEFA"); // sky
+
+const camera = new BABYLON.UniversalCamera("camera", new BABYLON.Vector3(8, 15, 8), scene);
+camera.attachControl(canvas, true);
+camera.speed = 0.5;
+
+const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(1, 1, 0), scene);
+
+const blockColors = {
+  grass: "#00aa00",
+  dirt: "#8B4513",
+  stone: "#808080",
+  coal: "#404040",
+  iron: "#b87333",
+  gold: "#FFD700",
+  redstone: "#FF0000",
+  diamond: "#00CED1",
+  lava: "#FF4500",
+  water: "#1E90FF",
+  leaves: "#006400",
+  logs: "#4b2e2e",
+  bedrock: "#000000"
+};
+
+let selectedBlock = "grass";
+
+// Inventory UI
+const inventory = document.getElementById("inventory");
+Object.keys(blockColors).forEach(type => {
+  const btn = document.createElement("div");
+  btn.className = "block-btn";
+  btn.style.background = blockColors[type];
+  btn.onclick = () => {
+    selectedBlock = type;
+    document.querySelectorAll(".block-btn").forEach(b => b.classList.remove("selected"));
+    btn.classList.add("selected");
+  };
+  inventory.appendChild(btn);
+});
+inventory.firstChild.classList.add("selected");
+
+// Terrain generation
+function perlin(x, z) {
+  return Math.floor((Math.sin(x * 0.2) + Math.cos(z * 0.2)) * 2 + 5);
+}
+
+function createBlock(x, y, z, type, physics = false) {
+  const box = BABYLON.MeshBuilder.CreateBox(`box-${x}-${y}-${z}`, { size: 1 }, scene);
+  box.position.set(x, y, z);
+  const mat = new BABYLON.StandardMaterial(`mat-${x}-${y}-${z}`, scene);
+  mat.diffuseColor = BABYLON.Color3.FromHexString(blockColors[type]);
+  box.material = mat;
+  if (physics) {
+    box.physicsImpostor = new BABYLON.PhysicsImpostor(box, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, restitution: 0 }, scene);
+  }
+  return box;
+}
+
+// Ground blocks
+for (let x = 0; x < 16; x++) {
+  for (let z = 0; z < 16; z++) {
+    const height = perlin(x, z);
+    for (let y = 0; y <= height; y++) {
+      let type = y === height ? "grass" : "dirt";
+      createBlock(x, y, z, type, true);
+    }
+    createBlock(x, -1, z, "bedrock", true);
+  }
+}
+
+// Player physics body
+const player = BABYLON.MeshBuilder.CreateSphere("player", { diameter: 1 }, scene);
+player.position.set(8, 20, 8);
+player.physicsImpostor = new BABYLON.PhysicsImpostor(player, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 1, restitution: 0 }, scene);
+camera.lockedTarget = player;
+
+// Block placement
+scene.onPointerDown = function () {
+  const pick = scene.pick(scene.pointerX, scene.pointerY);
+  if (pick.hit) {
+    const pos = pick.pickedPoint;
+    const x = Math.floor(pos.x + 0.5);
+    const y = Math.floor(pos.y + 1.5);
+    const z = Math.floor(pos.z + 0.5);
+    createBlock(x, y, z, selectedBlock, true);
+  }
+};
+
+engine.runRenderLoop(() => {
+  scene.render();
+});
+
+window.addEventListener("resize", () => {
+  engine.resize();
+});
+</script>
+</body>
+</html>
