@@ -93,28 +93,44 @@ const blockColors = {
   bedrock: "#000000"
 };
 
-let selectedBlock = "grass";
+const blockTypes = Object.keys(blockColors);
+const keyMap = ["1","2","3","4","5","6","7","8","9","z","x","c","v"];
+const buttons = [];
+let selectedBlock = blockTypes[0];
 
 // Inventory UI
 const inventory = document.getElementById("inventory");
 const label = document.getElementById("selectedLabel");
 
-Object.keys(blockColors).forEach(type => {
+blockTypes.forEach((type, index) => {
   const btn = document.createElement("div");
   btn.className = "block-btn";
   btn.style.background = blockColors[type];
-  btn.onclick = () => {
-    selectedBlock = type;
-    document.querySelectorAll(".block-btn").forEach(b => b.classList.remove("selected"));
-    btn.classList.add("selected");
-    label.textContent = "Selected: " + selectedBlock;
-  };
+  btn.onclick = () => selectBlock(index);
   inventory.appendChild(btn);
+  buttons.push(btn);
 });
-inventory.firstChild.classList.add("selected");
+
+function selectBlock(index) {
+  selectedBlock = blockTypes[index];
+  buttons.forEach(b => b.classList.remove("selected"));
+  buttons[index].classList.add("selected");
+  label.textContent = "Selected: " + selectedBlock;
+}
+
+selectBlock(0); // default to first block
+
+// Keybinds
+window.addEventListener("keydown", (e) => {
+  const key = e.key.toLowerCase();
+  const index = keyMap.indexOf(key);
+  if (index !== -1 && blockTypes[index]) {
+    selectBlock(index);
+  }
+});
 
 // First-person camera
-const camera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(16, 20, 16), scene);
+const camera = new BABYLON.UniversalCamera("fpCamera", new BABYLON.Vector3(0, 0, 0), scene);
 camera.attachControl(canvas, true);
 camera.checkCollisions = true;
 camera.applyGravity = true;
@@ -151,9 +167,11 @@ function createBlock(x, y, z, type, physics = false) {
 }
 
 // Generate terrain
+let highestY = 0;
 for (let x = 0; x < 32; x++) {
   for (let z = 0; z < 32; z++) {
     const h = perlin(x, z);
+    if (h > highestY) highestY = h;
     for (let y = 0; y <= h; y++) {
       let type = "dirt";
       if (y === h) type = "grass";
@@ -171,6 +189,9 @@ for (let x = 0; x < 32; x++) {
     createBlock(x, -1, z, "bedrock", true);
   }
 }
+
+// Spawn player above terrain
+camera.position = new BABYLON.Vector3(16, highestY + 5, 16);
 
 // WASD movement
 const inputMap = {};
@@ -200,16 +221,4 @@ scene.onPointerDown = function () {
     const x = Math.floor(pos.x + 0.5);
     const y = Math.floor(pos.y + 0.5);
     const z = Math.floor(pos.z + 0.5);
-    createBlock(x, y, z, selectedBlock, true);
-  }
-};
-
-engine.runRenderLoop(() => {
-  scene.render();
-});
-window.addEventListener("resize", () => {
-  engine.resize();
-});
-</script>
-</body>
-</html>
+    createBlock(x, y,
