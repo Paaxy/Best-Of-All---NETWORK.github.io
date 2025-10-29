@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>MiniCraft Babylon</title>
+  <title>MiniCraft Web</title>
   <link rel="stylesheet" href="minicraft.html.css">
 </head>
 <body>
@@ -10,9 +10,16 @@
   <div id="inventory"></div>
   <div id="selectedLabel">Selected: grass</div>
   <div id="crosshair"></div>
+  <div id="mobileControls">
+    <div id="joystick"></div>
+    <button id="jumpBtn">Jump</button>
+    <button id="placeBtn">Place</button>
+  </div>
 
   <script src="https://cdn.babylonjs.com/babylon.js"></script>
   <script src="https://cdn.babylonjs.com/cannon.js"></script>
+  <script src="minicraft.html.terrains.js"></script>
+  <script src="minicraft.html.controls.js"></script>
   <script src="minicraft.html.js"></script>
 </body>
 </html>
